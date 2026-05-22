@@ -1,0 +1,16 @@
+import * as Sentry from "@sentry/nextjs";
+import { parseSampleRate, scrubSensitiveRequestData } from "./src/lib/sentry";
+
+const dsn = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN;
+
+if (dsn) {
+  Sentry.init({
+    dsn,
+    environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV,
+    release: process.env.SENTRY_RELEASE,
+    tracesSampleRate: parseSampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE),
+    profilesSampleRate: parseSampleRate(process.env.SENTRY_PROFILES_SAMPLE_RATE),
+    sendDefaultPii: false,
+    beforeSend: scrubSensitiveRequestData,
+  });
+}

@@ -1,0 +1,15 @@
+export const statusToneMap = {
+  submitted: "warning",
+  under_review: "warning",
+  quoted: "neutral",
+  approved: "success",
+  assigned: "success",
+  active: "success",
+  in_progress: "success",
+  completed: "success",
+  paid: "success",
+  rejected: "danger",
+  cancelled: "danger",
+  open: "danger",
+  resolved: "success",
+} as const;

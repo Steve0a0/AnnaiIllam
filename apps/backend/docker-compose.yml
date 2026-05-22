@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16
+    container_name: annai_illam_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-annai_illam}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      # SECURITY: override POSTGRES_PASSWORD in a .env file — never commit real passwords.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:latest
+    container_name: annai_illam_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      # SECURITY: override MINIO_ROOT_PASSWORD in a .env file — never commit real passwords.
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console → http://localhost:9001
+    volumes:
+      - minio_data:/data
+
+volumes:
+  postgres_data:
+  minio_data:

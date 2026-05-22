@@ -1,0 +1,47 @@
+name: Backend CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Pytest and Ruff
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/backend
+    env:
+      APP_ENV: local
+      DATABASE_URL: sqlite:///:memory:
+      REDIS_URL: redis://localhost:6379/15
+      JWT_SECRET_KEY: test-secret-key-for-ci-only-min-32chars!!
+      PAYMENT_WEBHOOK_SECRET: test-payment-webhook-secret
+      RAZORPAY_KEY_ID: rzp_test_ci
+      RAZORPAY_KEY_SECRET: test_razorpay_secret
+      BACKEND_CORS_ORIGINS: http://localhost:3000
+      SMS_PROVIDER: console
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/backend/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run Ruff
+        run: python -m ruff check app tests scripts
+
+      - name: Run pytest
+        run: python -m pytest -v
