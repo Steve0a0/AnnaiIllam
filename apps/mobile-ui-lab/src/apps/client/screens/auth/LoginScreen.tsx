@@ -77,7 +77,7 @@ type GoogleBtnProps = { onSignIn: (result: SocialAuthTokens) => Promise<void> };
 
 function GoogleSignInButton({ onSignIn }: GoogleBtnProps) {
   const [isPending, setIsPending] = useState(false);
-  const redirectUri = AuthSession.makeRedirectUri({ useProxy: true });
+  const redirectUri = AuthSession.makeRedirectUri();
   const [, , promptAsync] = Google.useAuthRequest({
     webClientId: GOOGLE_WEB_ID,
     iosClientId: GOOGLE_IOS_ID,
@@ -88,7 +88,7 @@ function GoogleSignInButton({ onSignIn }: GoogleBtnProps) {
   const handlePress = async () => {
     setIsPending(true);
     try {
-      const response = await promptAsync({ prompt: 'select_account' });
+      const response = await promptAsync();
       if (response?.type !== 'success') return;
       const idToken = response.authentication?.idToken;
       if (!idToken) {
@@ -153,9 +153,10 @@ export default function LoginScreen({ navigation }: Props) {
     }
     Keyboard.dismiss();
     setIsPending(true);
+    const phoneWithCode = '+91' + phone.trim();
     try {
-      const result = await authService.requestOtp({ phone: phone.trim(), role: 'client' });
-      navigation.navigate('VerifyOtp', { phone: phone.trim(), devOtp: result?.otp });
+      const result = await authService.requestOtp({ phone: phoneWithCode, role: 'client' });
+      navigation.navigate('VerifyOtp', { phone: phoneWithCode, devOtp: result?.otp });
     } catch (err) {
       Alert.alert('Error', getApiError(err, 'Failed to send code. Please try again.'));
     } finally {

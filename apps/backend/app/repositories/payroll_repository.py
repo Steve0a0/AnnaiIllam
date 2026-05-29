@@ -90,3 +90,21 @@ def get_locked_payroll_run_for_assignment_date(
         .order_by(PayrollRun.created_at.desc())
     )
     return db.execute(stmt).scalars().first()
+
+
+def get_payroll_items_for_assignment_in_period(
+    db: Session,
+    assignment_id: int,
+    attendance_date,
+) -> list[PayrollItem]:
+    """Return all PayrollItems for an assignment whose PayrollRun period covers attendance_date."""
+    stmt = (
+        select(PayrollItem)
+        .join(PayrollRun, PayrollRun.id == PayrollItem.payroll_run_id)
+        .where(
+            PayrollItem.assignment_id == assignment_id,
+            PayrollRun.period_start <= attendance_date,
+            PayrollRun.period_end >= attendance_date,
+        )
+    )
+    return list(db.execute(stmt).scalars().all())

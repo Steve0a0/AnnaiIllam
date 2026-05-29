@@ -8,3 +8,11 @@ class AttendanceStatus(str, Enum):
     LATE = "late"
     APPROVED = "approved"
     CORRECTED = "corrected"
+    NO_SHOW = "no_show"
+    EXCUSED = "excused"
+
+
+class AttendanceApprovalStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"

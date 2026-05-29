@@ -129,7 +129,15 @@ export default function FinancePage() {
   const totalWorkerPayout = payrollRuns
     .flatMap((r) => r.items)
     .reduce((s, item) => s + item.net_amount, 0);
-  const platformMargin = totalCollected - totalWorkerPayout;
+
+  // Rate-based margin: sum of (client_rate - worker_rate) × payable_days per item.
+  // Falls back to cash-based (collected - payout) when no items have rate data yet.
+  const allPayrollItems = payrollRuns.flatMap((r) => r.items);
+  const itemsWithMargin = allPayrollItems.filter((item) => item.platform_margin !== null);
+  const platformMargin =
+    itemsWithMargin.length > 0
+      ? itemsWithMargin.reduce((s, item) => s + (item.platform_margin as number), 0)
+      : totalCollected - totalWorkerPayout;
 
   return (
     <div className="space-y-6">
@@ -522,6 +530,20 @@ function PayrollQueue({
                           {item.deductions
                             .map((d) => ` (${d.deduction_type.replace("_", " ")})`)
                             .join("")}
+                        </p>
+                      )}
+                      {item.platform_margin !== null && (
+                        <p className={cn(
+                          "mt-0.5 text-sm",
+                          item.platform_margin < 0 ? "text-red-600" : "text-blue-600"
+                        )}>
+                          Margin: {item.platform_margin < 0 ? "−" : "+"}{formatCurrency(Math.abs(item.platform_margin))}
+                          {item.platform_margin < 0 && " · Worker salary exceeds client rate"}
+                        </p>
+                      )}
+                      {item.is_stale && (
+                        <p className="mt-0.5 text-xs font-semibold text-amber-700">
+                          ⚠ Stale — payroll needs recalculation due to attendance correction
                         </p>
                       )}
                     </div>

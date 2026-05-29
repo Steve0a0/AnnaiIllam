@@ -4,14 +4,22 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.admin_assignments import router as admin_assignments_router
+from app.api.admin_blacklist import router as admin_blacklist_router
+from app.api.admin_disbursements import router as admin_disbursements_router
+from app.api.worker_disbursements import router as worker_disbursements_router
+from app.api.client_disputes import router as client_disputes_router
+from app.api.admin_disputes import router as admin_disputes_router
+from app.api.admin_scoping import router as admin_scoping_router
 from app.api.admin_audit import router as admin_audit_router
 from app.api.admin_attendance import router as admin_attendance_router
 from app.api.admin_complaints import router as admin_complaints_router
 from app.api.admin_dashboard import router as admin_dashboard_router
 from app.api.admin_maintenance import router as admin_maintenance_router
+from app.api.admin_worker_payments import router as admin_worker_payments_router
 from app.api.admin_payroll import router as admin_payroll_router
 from app.api.admin_people import router as admin_people_router
 from app.api.admin_finance import router as admin_finance_router
+from app.api.admin_invoice import router as admin_invoice_router
 from app.api.admin_profile import router as admin_profile_router
 from app.api.admin_replacements import router as admin_replacements_router
 from app.api.admin_reports import router as admin_reports_router
@@ -24,6 +32,7 @@ from app.api.client_profile import router as client_profile_router
 from app.api.client_complaints import router as client_complaints_router
 from app.api.client_requirements import router as client_requirements_router
 from app.api.client_payments import router as client_payments_router
+from app.api.client_invoices import router as client_invoices_router
 from app.api.client_ratings import router as client_ratings_router
 from app.api.health import router as health_router
 from app.api.me import router as me_router
@@ -40,19 +49,25 @@ from app.api.worker_payroll import router as worker_payroll_router
 from app.api.worker_profile import router as worker_profile_router
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
-from app.core.logging import log_requests
+from app.core.logging import configure_logging, log_requests
 from app.core.monitoring import init_sentry
 from app.core.scheduler import start_scheduler, stop_scheduler
 from app.core.security_headers import security_headers_middleware
 
 init_sentry()
+configure_logging(settings.is_local)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    start_scheduler()
+    # Skip background scheduler when running on SQLite (test environment).
+    # The scheduler uses SessionLocal which binds to a separate in-memory DB
+    # instance and would fail with "no such table" errors during tests.
+    if not settings.database_url.startswith("sqlite"):
+        start_scheduler()
     yield
-    stop_scheduler()
+    if not settings.database_url.startswith("sqlite"):
+        stop_scheduler()
 
 
 app = FastAPI(
@@ -104,6 +119,8 @@ app.include_router(client_payments_router, prefix=settings.api_v1_prefix)
 app.include_router(client_ratings_router, prefix=settings.api_v1_prefix)
 app.include_router(payment_webhooks_router, prefix=settings.api_v1_prefix)
 app.include_router(admin_finance_router, prefix=settings.api_v1_prefix)
+app.include_router(admin_invoice_router, prefix=settings.api_v1_prefix)
+app.include_router(client_invoices_router, prefix=settings.api_v1_prefix)
 app.include_router(client_complaints_router, prefix=settings.api_v1_prefix)
 app.include_router(admin_complaints_router, prefix=settings.api_v1_prefix)
 app.include_router(admin_replacements_router, prefix=settings.api_v1_prefix)
@@ -112,3 +129,10 @@ app.include_router(admin_reports_router, prefix=settings.api_v1_prefix)
 app.include_router(admin_audit_router, prefix=settings.api_v1_prefix)
 app.include_router(admin_sla_router, prefix=settings.api_v1_prefix)
 app.include_router(admin_maintenance_router, prefix=settings.api_v1_prefix)
+app.include_router(admin_worker_payments_router, prefix=settings.api_v1_prefix)
+app.include_router(admin_blacklist_router, prefix=settings.api_v1_prefix)
+app.include_router(admin_disbursements_router, prefix=settings.api_v1_prefix)
+app.include_router(worker_disbursements_router, prefix=settings.api_v1_prefix)
+app.include_router(client_disputes_router, prefix=settings.api_v1_prefix)
+app.include_router(admin_disputes_router, prefix=settings.api_v1_prefix)
+app.include_router(admin_scoping_router, prefix=settings.api_v1_prefix)

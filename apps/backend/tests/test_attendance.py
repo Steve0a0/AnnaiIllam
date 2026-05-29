@@ -56,7 +56,7 @@ def approved_requirement(db, client_profile, client_user):
         site_latitude=13.0827,
         site_longitude=80.2707,
         geofence_radius_meters=500,
-        status=RequirementStatus.ASSIGNED.value,
+        status=RequirementStatus.WORKERS_ASSIGNED.value,
         created_by_user_id=client_user.id,
     )
     db.add(requirement)
@@ -265,7 +265,10 @@ class TestWorkerAttendanceFlow:
 
         listing = client.get(f"{BASE}/worker/attendance", headers=worker_headers)
         assert listing.status_code == 200
-        rows = listing.json()["data"]
+        page_data = listing.json()["data"]
+        assert page_data["total"] == 1
+        assert page_data["page"] == 1
+        rows = page_data["items"]
         assert len(rows) == 1
         assert rows[0]["assignment_id"] == assignment.id
         assert rows[0]["check_in_time"] is not None
@@ -306,14 +309,16 @@ class TestWorkerAttendanceFlow:
         assert response.status_code == 400
         assert "already marked" in response.json()["message"].lower()
 
-    def test_check_out_requires_open_check_in(self, client, worker_headers, assignment):
+    def test_check_out_requires_active_assignment(self, client, worker_headers, assignment):
+        # Fix 12: the ACTIVE guard now fires before the open-attendance check.
+        # The fixture assignment starts in ACCEPTED state so check-out is blocked early.
         response = client.post(
             f"{BASE}/worker/attendance/check-out",
             json=check_out_payload(assignment.id),
             headers=worker_headers,
         )
         assert response.status_code == 400
-        assert "no open check-in" in response.json()["message"].lower()
+        assert "active" in response.json()["message"].lower()
 
     def test_worker_cannot_mark_attendance_for_another_workers_assignment(
         self,
@@ -464,3 +469,665 @@ class TestAdminAttendanceFlow:
             headers=worker_headers,
         )
         assert records.status_code == 403
+
+
+# ──────────────────────────────────────────────────────────────────
+# Admin Attendance List — date / requirement / status filters
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestAdminAttendanceListFilters:
+    """Cover the new date/requirement_id/status query params on GET /admin/attendance."""
+
+    def test_list_defaults_to_today(
+        self, client, admin_headers, worker_headers, assignment
+    ):
+        """Default call (no params) returns today's attendance."""
+        check_in(client, assignment.id, worker_headers)
+        response = client.get(f"{BASE}/admin/attendance", headers=admin_headers)
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert isinstance(data, list)
+        assert any(r["assignment_id"] == assignment.id for r in data)
+
+    def test_date_filter_returns_matching_records(
+        self, client, admin_headers, worker_headers, assignment
+    ):
+        check_in_data = check_in(client, assignment.id, worker_headers)
+        today = check_in_data["attendance_date"]
+        response = client.get(
+            f"{BASE}/admin/attendance",
+            params={"date": today},
+            headers=admin_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert all(r["attendance_date"] == today for r in data)
+
+    def test_date_filter_past_date_returns_empty(
+        self, client, admin_headers, worker_headers, assignment
+    ):
+        """A date in the past (before any test data) returns no records."""
+        check_in(client, assignment.id, worker_headers)
+        response = client.get(
+            f"{BASE}/admin/attendance",
+            params={"date": "2000-01-01"},
+            headers=admin_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["data"] == []
+
+    def test_requirement_id_filter(
+        self,
+        client,
+        admin_headers,
+        worker_headers,
+        assignment,
+        approved_requirement,
+    ):
+        check_in(client, assignment.id, worker_headers)
+        response = client.get(
+            f"{BASE}/admin/attendance",
+            params={"requirement_id": approved_requirement.id},
+            headers=admin_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert any(r["requirement_id"] == approved_requirement.id for r in data)
+
+    def test_requirement_id_filter_wrong_id_returns_empty(
+        self, client, admin_headers, worker_headers, assignment
+    ):
+        check_in(client, assignment.id, worker_headers)
+        response = client.get(
+            f"{BASE}/admin/attendance",
+            params={"requirement_id": 99999},
+            headers=admin_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["data"] == []
+
+    def test_status_filter_present(
+        self, client, admin_headers, worker_headers, assignment
+    ):
+        check_in(client, assignment.id, worker_headers)
+        response = client.get(
+            f"{BASE}/admin/attendance",
+            params={"status": "present"},
+            headers=admin_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert all(r["status"] == "present" for r in data)
+
+    def test_status_filter_approved_excludes_present(
+        self, client, admin_headers, worker_headers, assignment
+    ):
+        check_in(client, assignment.id, worker_headers)
+        response = client.get(
+            f"{BASE}/admin/attendance",
+            params={"status": "approved"},
+            headers=admin_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()["data"]
+        # freshly checked-in record is "present", not "approved"
+        assert all(r["assignment_id"] != assignment.id for r in data)
+
+    def test_correction_updates_status(
+        self, client, admin_headers, worker_headers, assignment
+    ):
+        check_in_data = check_in(client, assignment.id, worker_headers)
+        attendance_id = check_in_data["attendance_id"]
+        today = check_in_data["attendance_date"]
+
+        correction = client.patch(
+            f"{BASE}/admin/attendance/{attendance_id}",
+            json={"status": "approved", "notes": "Quick verify"},
+            headers=admin_headers,
+        )
+        assert correction.status_code == 200
+        assert correction.json()["data"]["status"] == "approved"
+
+        # Refreshed list reflects update
+        refreshed = client.get(
+            f"{BASE}/admin/attendance",
+            params={"date": today, "status": "approved"},
+            headers=admin_headers,
+        )
+        assert refreshed.status_code == 200
+        ids = [r["id"] for r in refreshed.json()["data"]]
+        assert attendance_id in ids
+
+    def test_response_includes_requirement_id_field(
+        self, client, admin_headers, worker_headers, assignment, approved_requirement
+    ):
+        check_in(client, assignment.id, worker_headers)
+        response = client.get(f"{BASE}/admin/attendance", headers=admin_headers)
+        data = response.json()["data"]
+        record = next(r for r in data if r["assignment_id"] == assignment.id)
+        assert "requirement_id" in record
+        assert record["requirement_id"] == approved_requirement.id
+
+    def test_non_admin_cannot_list_all_attendance(
+        self, client, worker_headers
+    ):
+        response = client.get(f"{BASE}/admin/attendance", headers=worker_headers)
+        assert response.status_code == 403
+
+
+# ──────────────────────────────────────────────────────────────────
+# P2-3 — Attendance Correction Stales Payroll
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestAttendanceCorrectionStalesPayroll:
+    """Attendance correction marks payroll items stale; recalculate updates amounts."""
+
+    def _make_payroll_run(self, db, admin_user, attendance_date, status="draft"):
+        run = PayrollRun(
+            period_start=attendance_date - timedelta(days=1),
+            period_end=attendance_date + timedelta(days=1),
+            status=status,
+            notes="Test run",
+            created_by_user_id=admin_user.id,
+        )
+        db.add(run)
+        db.flush()
+        return run
+
+    def _make_payroll_item(self, db, run, assignment, worker_profile, payment_status="pending"):
+        item = PayrollItem(
+            payroll_run_id=run.id,
+            assignment_id=assignment.id,
+            worker_profile_id=worker_profile.id,
+            gross_amount=1250,
+            total_deduction_amount=0,
+            net_amount=1250,
+            attendance_days=1,
+        )
+        item.payment_status = payment_status
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return item
+
+    def test_correction_with_no_payroll_returns_empty_stale_list(
+        self, client, db, admin_headers, worker_headers, assignment
+    ):
+        check_in_data = check_in(client, assignment.id, worker_headers)
+        attendance_id = check_in_data["attendance_id"]
+
+        response = client.patch(
+            f"{BASE}/admin/attendance/{attendance_id}",
+            json={"status": "approved", "notes": "No payroll yet"},
+            headers=admin_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["data"]["stale_payroll_item_ids"] == []
+
+    def test_correction_marks_covering_payroll_item_stale(
+        self, client, db, admin_headers, worker_headers, assignment, worker_profile, admin_user
+    ):
+        check_in_data = check_in(client, assignment.id, worker_headers)
+        attendance_id = check_in_data["attendance_id"]
+        attendance_date = date.fromisoformat(check_in_data["attendance_date"])
+
+        run = self._make_payroll_run(db, admin_user, attendance_date)
+        item = self._make_payroll_item(db, run, assignment, worker_profile)
+
+        response = client.patch(
+            f"{BASE}/admin/attendance/{attendance_id}",
+            json={"status": "approved", "notes": "Correction"},
+            headers=admin_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert item.id in data["stale_payroll_item_ids"]
+
+        db.refresh(item)
+        assert item.is_stale is True
+        assert item.gross_amount == 1250  # amounts unchanged
+
+    def test_correction_marks_paid_item_stale_without_changing_amounts(
+        self, client, db, admin_headers, worker_headers, assignment, worker_profile, admin_user
+    ):
+        check_in_data = check_in(client, assignment.id, worker_headers)
+        attendance_id = check_in_data["attendance_id"]
+        attendance_date = date.fromisoformat(check_in_data["attendance_date"])
+
+        run = self._make_payroll_run(db, admin_user, attendance_date)
+        item = self._make_payroll_item(db, run, assignment, worker_profile, payment_status="paid")
+
+        response = client.patch(
+            f"{BASE}/admin/attendance/{attendance_id}",
+            json={"status": "approved", "notes": "Late correction on paid item"},
+            headers=admin_headers,
+        )
+        assert response.status_code == 200
+        db.refresh(item)
+        assert item.is_stale is True
+        assert item.net_amount == 1250  # amounts untouched
+
+    def test_recalculate_stale_unpaid_item_updates_amounts(
+        self, client, db, admin_headers, worker_headers, assignment, worker_profile, admin_user
+    ):
+        check_in_data = check_in(client, assignment.id, worker_headers)
+        attendance_id = check_in_data["attendance_id"]
+        attendance_date = date.fromisoformat(check_in_data["attendance_date"])
+
+        run = self._make_payroll_run(db, admin_user, attendance_date)
+        item = self._make_payroll_item(db, run, assignment, worker_profile)
+
+        # Mark stale via correction
+        client.patch(
+            f"{BASE}/admin/attendance/{attendance_id}",
+            json={"status": "approved"},
+            headers=admin_headers,
+        )
+        db.refresh(item)
+        assert item.is_stale is True
+
+        # Recalculate
+        response = client.post(
+            f"{BASE}/admin/payroll/items/{item.id}/recalculate",
+            headers=admin_headers,
+        )
+        assert response.status_code == 200
+        db.refresh(item)
+        assert item.is_stale is False
+
+    def test_recalculate_paid_item_returns_400(
+        self, client, db, admin_headers, worker_headers, assignment, worker_profile, admin_user
+    ):
+        check_in_data = check_in(client, assignment.id, worker_headers)
+        attendance_date = date.fromisoformat(check_in_data["attendance_date"])
+
+        run = self._make_payroll_run(db, admin_user, attendance_date)
+        item = self._make_payroll_item(db, run, assignment, worker_profile, payment_status="paid")
+        item.is_stale = True
+        db.commit()
+
+        response = client.post(
+            f"{BASE}/admin/payroll/items/{item.id}/recalculate",
+            headers=admin_headers,
+        )
+        assert response.status_code == 400
+        assert "paid" in response.json()["message"].lower()
+
+    def test_recalculate_non_stale_item_returns_400(
+        self, client, db, admin_headers, assignment, worker_profile, admin_user
+    ):
+        today = date.today()
+        run = self._make_payroll_run(db, admin_user, today)
+        item = self._make_payroll_item(db, run, assignment, worker_profile)
+        assert item.is_stale is False
+
+        response = client.post(
+            f"{BASE}/admin/payroll/items/{item.id}/recalculate",
+            headers=admin_headers,
+        )
+        assert response.status_code == 400
+        assert "stale" in response.json()["message"].lower()
+
+    def test_multiple_corrections_keep_item_stale_until_recalculated(
+        self, client, db, admin_headers, worker_headers, assignment, worker_profile, admin_user
+    ):
+        check_in_data = check_in(client, assignment.id, worker_headers)
+        attendance_id = check_in_data["attendance_id"]
+        attendance_date = date.fromisoformat(check_in_data["attendance_date"])
+
+        run = self._make_payroll_run(db, admin_user, attendance_date)
+        item = self._make_payroll_item(db, run, assignment, worker_profile)
+
+        for note in ("First correction", "Second correction"):
+            client.patch(
+                f"{BASE}/admin/attendance/{attendance_id}",
+                json={"status": "approved", "notes": note},
+                headers=admin_headers,
+            )
+
+        db.refresh(item)
+        assert item.is_stale is True
+
+
+# ──────────────────────────────────────────────────────────────────
+# Fix 4 (P0-4) — Half-day reporting triggers in_progress lifecycle
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestHalfDayLifecycleTrigger:
+    """worker_report_half_day must activate assignment and move requirement to in_progress."""
+
+    def test_half_day_transitions_requirement_to_in_progress(
+        self,
+        client,
+        db,
+        worker_headers,
+        assignment,
+        approved_requirement,
+    ):
+        """First half-day on a workers_assigned requirement must set in_progress."""
+        response = client.post(
+            f"{BASE}/worker/attendance/half-day",
+            json={"assignment_id": assignment.id, "notes": "Left early, doctor visit."},
+            headers=worker_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["status"] == AttendanceStatus.HALF_DAY.value
+        assert data["assignment_id"] == assignment.id
+
+        db.refresh(assignment)
+        db.refresh(approved_requirement)
+        assert assignment.status == AssignmentStatus.ACTIVE.value
+        assert approved_requirement.status == RequirementStatus.IN_PROGRESS.value
+
+    def test_half_day_on_already_in_progress_requirement_stays_in_progress(
+        self,
+        client,
+        db,
+        worker_headers,
+        assignment,
+        approved_requirement,
+    ):
+        """Subsequent half-day when requirement is already in_progress must not regress status."""
+        approved_requirement.status = RequirementStatus.IN_PROGRESS.value
+        assignment.status = AssignmentStatus.ACTIVE.value
+        db.commit()
+
+        response = client.post(
+            f"{BASE}/worker/attendance/half-day",
+            json={"assignment_id": assignment.id},
+            headers=worker_headers,
+        )
+
+        assert response.status_code == 200
+        db.refresh(approved_requirement)
+        assert approved_requirement.status == RequirementStatus.IN_PROGRESS.value
+
+    def test_half_day_duplicate_for_same_day_is_rejected(
+        self,
+        client,
+        worker_headers,
+        assignment,
+    ):
+        """A second half-day report for the same day must be rejected."""
+        client.post(
+            f"{BASE}/worker/attendance/half-day",
+            json={"assignment_id": assignment.id},
+            headers=worker_headers,
+        )
+
+        response = client.post(
+            f"{BASE}/worker/attendance/half-day",
+            json={"assignment_id": assignment.id},
+            headers=worker_headers,
+        )
+
+        assert response.status_code == 400
+        assert "already recorded" in response.json()["message"].lower()
+
+    def test_half_day_cannot_be_reported_for_another_workers_assignment(
+        self,
+        client,
+        other_worker_headers,
+        other_worker_profile,  # ensures profile row exists so 403 is reached
+        assignment,
+    ):
+        """Worker must not be able to report half-day for a different worker's assignment."""
+        response = client.post(
+            f"{BASE}/worker/attendance/half-day",
+            json={"assignment_id": assignment.id},
+            headers=other_worker_headers,
+        )
+
+        assert response.status_code == 403
+
+    def test_half_day_and_check_in_both_correctly_set_in_progress(
+        self,
+        client,
+        db,
+        worker_headers,
+        other_worker_headers,
+        assignment,
+        other_assignment,
+        approved_requirement,
+    ):
+        """Verify both code paths (check-in and half-day) produce in_progress independently."""
+        r1 = client.post(
+            f"{BASE}/worker/attendance/half-day",
+            json={"assignment_id": assignment.id},
+            headers=worker_headers,
+        )
+        assert r1.status_code == 200
+
+        db.refresh(approved_requirement)
+        assert approved_requirement.status == RequirementStatus.IN_PROGRESS.value
+
+        r2 = client.post(
+            f"{BASE}/worker/attendance/check-in",
+            json={
+                "assignment_id": other_assignment.id,
+                "latitude": 13.0827,
+                "longitude": 80.2707,
+            },
+            headers=other_worker_headers,
+        )
+        assert r2.status_code == 200
+
+        db.refresh(approved_requirement)
+        assert approved_requirement.status == RequirementStatus.IN_PROGRESS.value
+
+
+# ──────────────────────────────────────────────────────────────────
+# Fix 5 (P1-1) — Check-in state-machine guard
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestCheckInStateMachineGuard:
+    """worker_check_in must reject check-ins on requirements in non-transitionable states."""
+
+    def _make_assignment_on_requirement(self, db, requirement, worker_profile, admin_user):
+        item = Assignment(
+            requirement_id=requirement.id,
+            worker_profile_id=worker_profile.id,
+            assigned_by_user_id=admin_user.id,
+            status=AssignmentStatus.ACCEPTED.value,
+            assigned_role="Guard",
+            assigned_shift="Day",
+            salary_amount=1000,
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return item
+
+    def _make_requirement(self, db, client_profile, client_user, status):
+        req = Requirement(
+            client_id=client_profile.id,
+            category="Security",
+            number_of_workers=1,
+            work_location="Gate A",
+            city="Chennai",
+            state="Tamil Nadu",
+            start_date=date.today(),
+            duration_days=5,
+            site_latitude=13.0827,
+            site_longitude=80.2707,
+            geofence_radius_meters=500,
+            status=status,
+            created_by_user_id=client_user.id,
+        )
+        db.add(req)
+        db.commit()
+        db.refresh(req)
+        return req
+
+    def test_check_in_on_cancelled_requirement_returns_400(
+        self,
+        client,
+        db,
+        worker_headers,
+        worker_profile,
+        admin_user,
+        client_profile,
+        client_user,
+    ):
+        """A cancelled requirement must block check-in; status must not be corrupted."""
+        req = self._make_requirement(
+            db, client_profile, client_user, RequirementStatus.CANCELLED.value
+        )
+        assignment = self._make_assignment_on_requirement(db, req, worker_profile, admin_user)
+
+        response = client.post(
+            f"{BASE}/worker/attendance/check-in",
+            json={"assignment_id": assignment.id, "latitude": 13.0827, "longitude": 80.2707},
+            headers=worker_headers,
+        )
+
+        assert response.status_code == 400
+        assert "cannot" in response.json()["message"].lower()
+        db.refresh(req)
+        assert req.status == RequirementStatus.CANCELLED.value
+
+    def test_check_in_on_completed_requirement_returns_400(
+        self,
+        client,
+        db,
+        worker_headers,
+        worker_profile,
+        admin_user,
+        client_profile,
+        client_user,
+    ):
+        """A completed requirement must also block further check-ins."""
+        req = self._make_requirement(
+            db, client_profile, client_user, RequirementStatus.COMPLETED.value
+        )
+        assignment = self._make_assignment_on_requirement(db, req, worker_profile, admin_user)
+
+        response = client.post(
+            f"{BASE}/worker/attendance/check-in",
+            json={"assignment_id": assignment.id, "latitude": 13.0827, "longitude": 80.2707},
+            headers=worker_headers,
+        )
+
+        assert response.status_code == 400
+        db.refresh(req)
+        assert req.status == RequirementStatus.COMPLETED.value
+
+    def test_check_in_on_workers_assigned_requirement_succeeds(
+        self,
+        client,
+        db,
+        worker_headers,
+        assignment,
+        approved_requirement,
+    ):
+        """Happy path: workers_assigned -> in_progress must still succeed after the fix."""
+        response = client.post(
+            f"{BASE}/worker/attendance/check-in",
+            json={"assignment_id": assignment.id, "latitude": 13.0827, "longitude": 80.2707},
+            headers=worker_headers,
+        )
+
+        assert response.status_code == 200
+        db.refresh(approved_requirement)
+        assert approved_requirement.status == RequirementStatus.IN_PROGRESS.value
+
+    def test_second_worker_check_in_on_already_in_progress_requirement_succeeds(
+        self,
+        client,
+        db,
+        worker_headers,
+        other_worker_headers,
+        assignment,
+        other_assignment,
+        approved_requirement,
+    ):
+        """Worker 2 checking in after requirement is already in_progress must not be blocked."""
+        client.post(
+            f"{BASE}/worker/attendance/check-in",
+            json={"assignment_id": assignment.id, "latitude": 13.0827, "longitude": 80.2707},
+            headers=worker_headers,
+        )
+        db.refresh(approved_requirement)
+        assert approved_requirement.status == RequirementStatus.IN_PROGRESS.value
+
+        r2 = client.post(
+            f"{BASE}/worker/attendance/check-in",
+            json={"assignment_id": other_assignment.id, "latitude": 13.0827, "longitude": 80.2707},
+            headers=other_worker_headers,
+        )
+        assert r2.status_code == 200
+        db.refresh(approved_requirement)
+        assert approved_requirement.status == RequirementStatus.IN_PROGRESS.value
+
+
+class TestCheckOutActiveGuard:
+    """Fix 12: worker_check_out must reject non-ACTIVE assignments with HTTP 400."""
+
+    def test_check_out_fails_when_assignment_is_assigned_not_active(
+        self,
+        client,
+        db,
+        worker_headers,
+        assignment,
+    ):
+        """Check-out on an assignment that is still 'assigned' (never checked in) must return 400."""
+        assignment.status = AssignmentStatus.ASSIGNED.value
+        db.commit()
+
+        response = client.post(
+            f"{BASE}/worker/attendance/check-out",
+            json=check_out_payload(assignment.id),
+            headers=worker_headers,
+        )
+
+        assert response.status_code == 400
+        assert "active" in response.json()["message"].lower()
+
+    def test_check_out_fails_when_assignment_is_completed(
+        self,
+        client,
+        db,
+        worker_headers,
+        assignment,
+    ):
+        """Check-out on a 'completed' assignment must return 400."""
+        assignment.status = AssignmentStatus.COMPLETED.value
+        db.commit()
+
+        response = client.post(
+            f"{BASE}/worker/attendance/check-out",
+            json=check_out_payload(assignment.id),
+            headers=worker_headers,
+        )
+
+        assert response.status_code == 400
+        assert "active" in response.json()["message"].lower()
+
+    def test_check_out_succeeds_when_assignment_is_active(
+        self,
+        client,
+        db,
+        worker_headers,
+        assignment,
+        approved_requirement,
+    ):
+        """Check-out on a properly ACTIVE assignment (after check-in) must return 200."""
+        # Check in first to create an open attendance record and put assignment in ACTIVE state
+        check_in(client, assignment.id, worker_headers)
+
+        db.refresh(assignment)
+        assert assignment.status == AssignmentStatus.ACTIVE.value
+
+        response = client.post(
+            f"{BASE}/worker/attendance/check-out",
+            json=check_out_payload(assignment.id),
+            headers=worker_headers,
+        )
+
+        assert response.status_code == 200

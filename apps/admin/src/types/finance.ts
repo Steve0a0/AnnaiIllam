@@ -143,6 +143,8 @@ export type PayrollQueueItem = {
   attendance_days: number;
   half_days: number;
   payment_status: string;
+  platform_margin: number | null;
+  is_stale: boolean;
   deductions: PayrollQueueDeduction[];
 };
 

@@ -1,7 +1,7 @@
 ﻿from datetime import datetime
 from app.utils.time import utcnow
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -10,7 +10,9 @@ from app.db.session import Base
 class ClientRating(Base):
     __tablename__ = "client_ratings"
     __table_args__ = (
-        UniqueConstraint("requirement_id", "rated_by_user_id", name="uq_client_rating_requirement_user"),
+        # One rating per (requirement, worker) — prevents duplicate ratings for the same worker.
+        UniqueConstraint("requirement_id", "worker_profile_id", name="uq_client_rating_requirement_worker"),
+        CheckConstraint("rating >= 1 AND rating <= 5", name="ck_client_ratings_rating_range"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)

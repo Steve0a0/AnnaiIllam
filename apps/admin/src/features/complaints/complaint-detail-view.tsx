@@ -110,6 +110,7 @@ export default function ComplaintDetailView({
         <CreateReplacementForm
           complaintId={complaint.id}
           oldAssignmentId={complaint.assignment_id}
+          requirementId={complaint.requirement_id}
           onSuccess={() => refetch()}
         />
       ) : null}

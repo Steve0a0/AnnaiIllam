@@ -1,4 +1,5 @@
 ﻿"use client";
+import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 import { useState } from "react";
@@ -21,6 +22,7 @@ export default function AddDeductionForm({
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [warning, setWarning] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,9 +30,10 @@ export default function AddDeductionForm({
 
     setLoading(true);
     setMessage("");
+    setWarning("");
 
     try {
-      await payrollService.addDeduction({
+      const result = await payrollService.addDeduction({
         payroll_item_id: payrollItemId,
         deduction_type: deductionType,
         amount: Number(amount),
@@ -39,8 +42,13 @@ export default function AddDeductionForm({
 
       setAmount("");
       setReason("");
-      setMessage("Deduction added successfully.");
       onSuccess();
+
+      if (result.data.warning) {
+        setWarning(result.data.warning.message);
+      } else {
+        setMessage("Deduction added successfully.");
+      }
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -84,7 +92,12 @@ export default function AddDeductionForm({
         />
       </div>
 
-      {message ? (
+      {warning ? (
+        <div className="flex items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+          <span>{warning}</span>
+        </div>
+      ) : message ? (
         <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
           {message}
         </div>

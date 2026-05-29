@@ -15,6 +15,7 @@ import ClientProfileScreen from '../screens/ClientProfileScreen';
 import InvoiceDetailScreen from '../screens/InvoiceDetailScreen';
 import PaymentConfirmScreen from '../screens/PaymentConfirmScreen';
 import RateRequirementScreen from '../screens/RateRequirementScreen';
+import DisputeScreen from '../screens/DisputeScreen';
 
 import type {
   ClientTabParamList,
@@ -48,6 +49,7 @@ function HomeStackNavigator() {
       <HomeStack.Screen name="InvoiceDetail" component={InvoiceDetailScreen} />
       <HomeStack.Screen name="PaymentConfirm" component={PaymentConfirmScreen} />
       <HomeStack.Screen name="RateRequirement" component={RateRequirementScreen} />
+      <HomeStack.Screen name="RaiseDispute" component={DisputeScreen} />
     </HomeStack.Navigator>
   );
 }
@@ -63,6 +65,7 @@ function JobsStackNavigator() {
       <JobsStack.Screen name="InvoiceDetail" component={InvoiceDetailScreen} />
       <JobsStack.Screen name="PaymentConfirm" component={PaymentConfirmScreen} />
       <JobsStack.Screen name="RateRequirement" component={RateRequirementScreen} />
+      <JobsStack.Screen name="RaiseDispute" component={DisputeScreen} />
     </JobsStack.Navigator>
   );
 }

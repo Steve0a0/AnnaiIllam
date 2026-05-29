@@ -21,9 +21,12 @@ def _strip_unsafe(value: str) -> str:
 
 def normalize_phone(phone: str) -> str:
     normalized = phone.strip().replace(" ", "")
-    if not re.fullmatch(r"\d{10,15}", normalized):
-        raise ValueError("Invalid phone number format")
-    return normalized
+    # Accept E.164 (+<digits>) or bare digits
+    if re.fullmatch(r"\+\d{10,15}", normalized):
+        return normalized
+    if re.fullmatch(r"\d{10,15}", normalized):
+        return normalized
+    raise ValueError("Invalid phone number format")
 
 
 def strip_text(value: str) -> str:

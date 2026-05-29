@@ -40,4 +40,11 @@ export const workerPayrollService = {
     const res = await http.get<Envelope<WorkerPayout[]>>('/worker/payroll/payouts');
     return res.data.data ?? [];
   },
+
+  getPayslipText: async (payrollItemId: number): Promise<string> => {
+    const res = await http.get<string>(`/worker/payroll/${payrollItemId}/payslip`, {
+      responseType: 'text',
+    });
+    return res.data as unknown as string;
+  },
 };

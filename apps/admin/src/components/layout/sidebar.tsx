@@ -11,6 +11,7 @@ import {
   Landmark,
   LayoutDashboard,
   MessageCircleWarning,
+  Scale,
   ScrollText,
   Settings,
   ShieldCheck,
@@ -57,6 +58,7 @@ const navGroups: NavGroup[] = [
   {
     label: "Management",
     items: [
+      { label: "Disputes", href: "/disputes", icon: Scale },
       { label: "Complaints", href: "/complaints", icon: MessageCircleWarning,
         sub: [
           { label: "All Complaints", href: "/complaints" },

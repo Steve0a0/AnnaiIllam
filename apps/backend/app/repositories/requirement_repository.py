@@ -30,6 +30,15 @@ def get_all_requirements(db: Session) -> list[Requirement]:
     return list(db.execute(stmt).scalars().all())
 
 
+def get_requirements_by_client_id_paginated_stmt(client_id: int):
+    """Return a select statement for a client's requirements — use with paginate()."""
+    return (
+        select(Requirement)
+        .where(Requirement.client_id == client_id)
+        .order_by(Requirement.created_at.desc())
+    )
+
+
 def get_requirements_paginated_stmt(status_filter: str | None = None):
     """Return a select statement for requirements, optionally filtered by status."""
     stmt = select(Requirement).order_by(Requirement.created_at.desc())

@@ -12,6 +12,7 @@ export default function PayrollRunCreateForm() {
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
   const [notes, setNotes] = useState("");
+  const [requireVerifiedAttendance, setRequireVerifiedAttendance] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -25,6 +26,7 @@ export default function PayrollRunCreateForm() {
         period_start: periodStart,
         period_end: periodEnd,
         notes: notes || null,
+        require_verified_attendance: requireVerifiedAttendance,
       });
 
       const payrollRunId = response.data.payroll_run_id;
@@ -73,6 +75,23 @@ export default function PayrollRunCreateForm() {
           placeholder="Enter payroll notes"
         />
       </Field>
+
+      <label className="flex cursor-pointer items-start gap-3">
+        <input
+          type="checkbox"
+          className="mt-0.5 size-4 rounded border-slate-300"
+          checked={requireVerifiedAttendance}
+          onChange={(e) => setRequireVerifiedAttendance(e.target.checked)}
+        />
+        <div>
+          <span className="text-sm font-medium text-slate-700">
+            Require verified attendance only
+          </span>
+          <p className="text-xs text-slate-500">
+            Only approved/corrected attendance will be counted.
+          </p>
+        </div>
+      </label>
 
       {message ? (
         <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">

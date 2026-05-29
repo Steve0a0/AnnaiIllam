@@ -4,10 +4,21 @@ import { useAuthStore } from '../store/auth.store';
 
 export const http = axios.create({
   baseURL: process.env.EXPO_PUBLIC_API_BASE_URL,
+  timeout: 15_000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+/** True when the error is a network failure (no response received). */
+export function isNetworkError(err: unknown): boolean {
+  return axios.isAxiosError(err) && !err.response;
+}
+
+/** True when the request timed out. */
+export function isTimeoutError(err: unknown): boolean {
+  return axios.isAxiosError(err) && err.code === 'ECONNABORTED';
+}
 
 let refreshPromise: Promise<string | null> | null = null;
 

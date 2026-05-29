@@ -1,14 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import date, timedelta
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from pydantic import BaseModel, field_validator
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.roles import require_role
 from app.core.roles import UserRole
-from app.core.statuses import QuoteStatus, RequirementStatus
+from app.core.statuses import QuoteStatus, RequirementStatus, validate_requirement_transition
 from app.db.deps import get_db
+from app.models.requirement import Requirement
 from app.models.user import User
 from app.repositories.client_repository import get_client_profile_by_user_id
 from app.repositories.assignment_repository import get_assignment_by_id, get_assignments_by_requirement_id
 from app.repositories.attendance_repository import get_attendance_for_assignment
+from app.models.client_payment import ClientPayment
+from app.models.client_rating import ClientRating
+from app.models.quote import Quote
 from app.repositories.payment_repository import get_client_payments_by_client_id
 from app.repositories.profile_repository import get_worker_profile_by_id
 from app.repositories.quote_repository import get_quote_by_requirement_id
@@ -17,11 +24,13 @@ from app.repositories.requirement_repository import (
     create_requirement,
     get_requirement_by_id,
     get_requirements_by_client_id,
+    get_requirements_by_client_id_paginated_stmt,
 )
+from app.utils.pagination import PaginationParams, paginate, pagination_meta
 from app.schemas.quote import QuoteDecisionSchema
 from app.schemas.rating import ClientRatingCreateSchema
 from app.schemas.requirement import RequirementCreateSchema
-from app.services.notification_service import queue_notification
+from app.services.notification_service import enqueue_push_to_user, queue_notification
 from app.services.requirement_service import build_requirement_entity
 from app.utils.audit import audit_event
 from app.utils.response import success_response
@@ -32,6 +41,7 @@ router = APIRouter(prefix="/client/requirements", tags=["Client Requirements"])
 @router.post("")
 def create_client_requirement(
     payload: RequirementCreateSchema,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(require_role(UserRole.CLIENT.value)),
     db: Session = Depends(get_db),
 ):
@@ -62,6 +72,21 @@ def create_client_requirement(
         context={"requirement_id": requirement.id, "status": requirement.status},
     )
 
+    # Notify all admins about the new requirement
+    client_name = client_profile.company_name or client_profile.contact_name or "A client"
+    admin_users = db.execute(
+        select(User).where(User.role == UserRole.ADMIN.value, User.is_active.is_(True))
+    ).scalars().all()
+    for admin in admin_users:
+        enqueue_push_to_user(
+            background_tasks,
+            db,
+            user_id=admin.id,
+            title="New requirement submitted",
+            body=f"New staffing requirement from {client_name}.",
+            data={"type": "new_requirement", "requirement_id": str(requirement.id)},
+        )
+
     return success_response(
         "Requirement created successfully",
         {
@@ -73,6 +98,7 @@ def create_client_requirement(
 
 @router.get("")
 def list_my_requirements(
+    pg: PaginationParams = Depends(),
     current_user: User = Depends(require_role(UserRole.CLIENT.value)),
     db: Session = Depends(get_db),
 ):
@@ -80,7 +106,41 @@ def list_my_requirements(
     if not client_profile:
         raise HTTPException(status_code=400, detail="Client profile not found")
 
-    requirements = get_requirements_by_client_id(db, client_profile.id)
+    stmt = get_requirements_by_client_id_paginated_stmt(client_profile.id)
+    requirements, total = paginate(stmt, db, pg)
+
+    req_ids = [r.id for r in requirements]
+
+    # Batch-fetch quotes, paid payments, and ratings — no N+1 queries
+    quotes: dict[int, Quote] = {}
+    paid_totals: dict[int, int] = {}
+    rated_req_ids: set[int] = set()
+    if req_ids:
+        for q in db.execute(select(Quote).where(Quote.requirement_id.in_(req_ids))).scalars().all():
+            quotes[q.requirement_id] = q
+        for p in db.execute(
+            select(ClientPayment).where(
+                ClientPayment.requirement_id.in_(req_ids),
+                ClientPayment.payment_status == "paid",
+            )
+        ).scalars().all():
+            paid_totals[p.requirement_id] = paid_totals.get(p.requirement_id, 0) + p.amount
+        for cr in db.execute(
+            select(ClientRating).where(
+                ClientRating.requirement_id.in_(req_ids),
+                ClientRating.rated_by_user_id == current_user.id,
+            )
+        ).scalars().all():
+            rated_req_ids.add(cr.requirement_id)
+
+    def pending_balance(item) -> int | None:
+        if item.status != RequirementStatus.IN_PROGRESS.value:
+            return None
+        quote = quotes.get(item.id)
+        if not quote or quote.payment_model == "client_pays_worker_directly":
+            return None
+        balance = max(0, (quote.quoted_amount or 0) - paid_totals.get(item.id, 0))
+        return balance if balance > 0 else None
 
     data = [
         {
@@ -90,10 +150,12 @@ def list_my_requirements(
             "city": item.city,
             "start_date": str(item.start_date),
             "status": item.status,
+            "pending_balance_amount": pending_balance(item),
+            "has_rated": item.id in rated_req_ids,
         }
         for item in requirements
     ]
-    return success_response("Requirements fetched successfully", data)
+    return success_response("Requirements fetched successfully", {"items": data, **pagination_meta(pg, total)})
 
 
 @router.get("/summary")
@@ -105,30 +167,38 @@ def get_client_dashboard_summary(
     if not client_profile:
         raise HTTPException(status_code=400, detail="Client profile not found")
 
-    requirements = get_requirements_by_client_id(db, client_profile.id)
     payments = get_client_payments_by_client_id(db, client_profile.id)
 
-    open_statuses = {
+    open_statuses = [
         RequirementStatus.SUBMITTED.value,
         RequirementStatus.UNDER_REVIEW.value,
         RequirementStatus.QUOTED.value,
         RequirementStatus.APPROVED.value,
-        RequirementStatus.ASSIGNED.value,
+        RequirementStatus.WORKERS_ASSIGNED.value,
         RequirementStatus.IN_PROGRESS.value,
-    }
-    pending_quote_statuses = {
+    ]
+    pending_quote_statuses = [
         RequirementStatus.SUBMITTED.value,
         RequirementStatus.UNDER_REVIEW.value,
         RequirementStatus.QUOTED.value,
-    }
+    ]
+
+    # Fix 19: replace per-requirement iteration with aggregate COUNT queries
+    def _count(statuses=None, exact=None):
+        stmt = select(func.count(Requirement.id)).where(Requirement.client_id == client_profile.id)
+        if statuses is not None:
+            stmt = stmt.where(Requirement.status.in_(statuses))
+        elif exact is not None:
+            stmt = stmt.where(Requirement.status == exact)
+        return db.execute(stmt).scalar_one()
 
     return success_response(
         "Client dashboard summary fetched successfully",
         {
-            "total_requirements": len(requirements),
-            "open_jobs": sum(1 for item in requirements if item.status in open_statuses),
-            "pending_quotes": sum(1 for item in requirements if item.status in pending_quote_statuses),
-            "completed_jobs": sum(1 for item in requirements if item.status == RequirementStatus.COMPLETED.value),
+            "total_requirements": _count(),
+            "open_jobs": _count(statuses=open_statuses),
+            "pending_quotes": _count(statuses=pending_quote_statuses),
+            "completed_jobs": _count(exact=RequirementStatus.COMPLETED.value),
             "paid_spend": sum(item.amount for item in payments if item.payment_status == "paid"),
             "pending_payments": sum(item.amount for item in payments if item.payment_status != "paid"),
         },
@@ -167,7 +237,6 @@ def get_my_requirement_detail(
                 "status": assignment.status,
                 "assigned_role": assignment.assigned_role,
                 "assigned_shift": assignment.assigned_shift,
-                "salary_amount": assignment.salary_amount,
                 "assigned_at": assignment.assigned_at.isoformat(),
                 "attendance": [
                     {
@@ -201,6 +270,8 @@ def get_my_requirement_detail(
             "budget_amount": requirement.budget_amount,
             "notes": requirement.notes,
             "status": requirement.status,
+            "rejection_reason": requirement.rejection_reason,
+            "cancellation_reason": requirement.cancellation_reason,
             "assignments": assignment_data,
             "rating": None
             if not rating
@@ -294,6 +365,7 @@ def rate_completed_requirement(
 def decide_quote(
     requirement_id: int,
     payload: QuoteDecisionSchema,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(require_role(UserRole.CLIENT.value)),
     db: Session = Depends(get_db),
 ):
@@ -312,26 +384,125 @@ def decide_quote(
     if quote.status != QuoteStatus.SENT.value:
         raise HTTPException(status_code=400, detail="Quote is not in decision state")
 
+    # Inline expiry: only the approve action is blocked when the quote has passed valid_until.
+    # The reject action is still allowed so the client can signal they don't want the expired quote.
+    if payload.action == "approve" and quote.valid_until is not None and date.today() > quote.valid_until:
+        quote.status = QuoteStatus.EXPIRED.value
+        quote.updated_by_user_id = current_user.id
+        try:
+            validate_requirement_transition(requirement.status, RequirementStatus.UNDER_REVIEW.value)
+            requirement.status = RequirementStatus.UNDER_REVIEW.value
+            requirement.updated_by_user_id = current_user.id
+        except ValueError:
+            pass
+        db.commit()
+        audit_event(
+            "quote_expired_inline",
+            {"quote_id": quote.id, "requirement_id": requirement.id, "client_user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="This quote has expired. Please wait for a new quote.",
+        )
+
+    # Extension quotes do not change the requirement status.
+    # Approving one extends duration_days and all active assignment end_dates.
+    if quote.quote_type == "extension":
+        extra_days = quote.extension_days or 0
+        if payload.action == "approve":
+            requirement.duration_days += extra_days
+            quote.status = QuoteStatus.APPROVED.value
+            quote.updated_by_user_id = current_user.id
+            requirement.updated_by_user_id = current_user.id
+            _active_statuses = {"assigned", "accepted", "active"}
+            for assignment in get_assignments_by_requirement_id(db, requirement_id):
+                if assignment.status in _active_statuses and assignment.end_date is not None:
+                    assignment.end_date += timedelta(days=extra_days)
+            db.commit()
+            audit_event(
+                "extension_approved",
+                {
+                    "requirement_id": requirement_id,
+                    "extension_quote_id": quote.id,
+                    "additional_days": extra_days,
+                    "new_duration_days": requirement.duration_days,
+                    "client_user_id": current_user.id,
+                },
+            )
+            # Notify workers on active assignments about the extension
+            _active_statuses_notify = {"assigned", "accepted", "active"}
+            for _asgn in get_assignments_by_requirement_id(db, requirement_id):
+                if _asgn.status in _active_statuses_notify:
+                    _wp = get_worker_profile_by_id(db, _asgn.worker_profile_id)
+                    if _wp and _wp.user_id:
+                        enqueue_push_to_user(
+                            background_tasks,
+                            db,
+                            user_id=_wp.user_id,
+                            title="Assignment extended",
+                            body=f"Your assignment has been extended by {extra_days} day(s).",
+                            data={"type": "extension_approved", "requirement_id": str(requirement_id), "screen": "JobsTab"},
+                        )
+        else:  # reject
+            quote.status = QuoteStatus.REJECTED.value
+            quote.updated_by_user_id = current_user.id
+            db.commit()
+            audit_event(
+                "extension_rejected",
+                {
+                    "requirement_id": requirement_id,
+                    "extension_quote_id": quote.id,
+                    "client_user_id": current_user.id,
+                },
+            )
+        return success_response(
+            f"Extension quote {payload.action}d successfully",
+            {
+                "requirement_id": requirement_id,
+                "requirement_status": requirement.status,
+                "quote_status": quote.status,
+            },
+        )
+
     if payload.action == "approve":
+        try:
+            validate_requirement_transition(requirement.status, RequirementStatus.APPROVED.value)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         quote.status = QuoteStatus.APPROVED.value
         requirement.status = RequirementStatus.APPROVED.value
     else:
+        try:
+            validate_requirement_transition(requirement.status, RequirementStatus.UNDER_REVIEW.value)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         quote.status = QuoteStatus.REJECTED.value
-        requirement.status = RequirementStatus.REJECTED.value
+        requirement.status = RequirementStatus.UNDER_REVIEW.value
 
     requirement.updated_by_user_id = current_user.id
     quote.updated_by_user_id = current_user.id
     db.commit()
 
-    audit_event(
-        "quote_decision_taken",
-        {
-            "requirement_id": requirement.id,
-            "quote_id": quote.id,
-            "action": payload.action,
-            "client_user_id": current_user.id,
-        },
-    )
+    if payload.action == "approve":
+        audit_event(
+            "quote_decision_taken",
+            {
+                "requirement_id": requirement.id,
+                "quote_id": quote.id,
+                "action": payload.action,
+                "client_user_id": current_user.id,
+            },
+        )
+    else:
+        audit_event(
+            "quote_rejected_by_client",
+            {
+                "requirement_id": requirement.id,
+                "quote_id": quote.id,
+                "requirement_reverted_to": RequirementStatus.UNDER_REVIEW.value,
+            },
+            actor_user_id=current_user.id,
+        )
     queue_notification(
         channel="sms",
         recipient=current_user.phone,
@@ -344,11 +515,98 @@ def decide_quote(
         },
     )
 
+    # Notify all admins about the quote decision
+    _action_label = "approved" if payload.action == "approve" else "rejected"
+    _admin_body = (
+        f"Client {_action_label} quote for requirement #{requirement.id}."
+    )
+    _admin_users = db.execute(
+        select(User).where(User.role == UserRole.ADMIN.value, User.is_active.is_(True))
+    ).scalars().all()
+    for _admin in _admin_users:
+        enqueue_push_to_user(
+            background_tasks,
+            db,
+            user_id=_admin.id,
+            title=f"Quote {_action_label} by client",
+            body=_admin_body,
+            data={"type": "quote_decision", "requirement_id": str(requirement.id)},
+        )
+
     return success_response(
         f"Quote {payload.action}d successfully",
         {
             "requirement_id": requirement.id,
             "requirement_status": requirement.status,
             "quote_status": quote.status,
+        },
+    )
+
+
+_CLIENT_CANCELLABLE_STATUSES = {
+    RequirementStatus.SUBMITTED.value,
+    RequirementStatus.QUOTED.value,
+}
+
+
+class ClientCancelRequirementSchema(BaseModel):
+    reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def reason_min_length(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 10:
+            raise ValueError("Cancellation reason must be at least 10 characters")
+        return v
+
+
+@router.post("/{requirement_id}/cancel")
+def client_cancel_requirement(
+    requirement_id: int,
+    payload: ClientCancelRequirementSchema,
+    current_user: User = Depends(require_role(UserRole.CLIENT.value)),
+    db: Session = Depends(get_db),
+):
+    client_profile = get_client_profile_by_user_id(db, current_user.id)
+    if not client_profile:
+        raise HTTPException(status_code=400, detail="Client profile not found")
+
+    requirement = get_requirement_by_id(db, requirement_id)
+    if not requirement or requirement.client_id != client_profile.id:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+
+    if requirement.status not in _CLIENT_CANCELLABLE_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot cancel a requirement in '{requirement.status}' status. "
+                   "Client cancellation is only allowed from 'submitted' or 'quoted'.",
+        )
+
+    try:
+        validate_requirement_transition(requirement.status, RequirementStatus.CANCELLED.value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    requirement.status = RequirementStatus.CANCELLED.value
+    requirement.cancellation_reason = payload.reason
+    requirement.updated_by_user_id = current_user.id
+    db.commit()
+
+    audit_event(
+        "requirement_cancelled_by_client",
+        {
+            "requirement_id": requirement.id,
+            "client_user_id": current_user.id,
+            "reason": payload.reason,
+        },
+    )
+
+    return success_response(
+        "Requirement cancelled",
+        {
+            "id": requirement.id,
+            "status": requirement.status,
+            "cancellation_reason": requirement.cancellation_reason,
         },
     )

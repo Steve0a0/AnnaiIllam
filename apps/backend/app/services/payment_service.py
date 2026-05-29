@@ -29,6 +29,7 @@ def build_reference_client_payment(
     client_id: int,
     requirement_id: int,
     amount: int,
+    payment_model: str,
     payment_mode: str,
     reference_note: str,
 ) -> ClientPayment:
@@ -37,7 +38,7 @@ def build_reference_client_payment(
         client_id=client_id,
         requirement_id=requirement_id,
         amount=amount,
-        payment_model="client_pays_company",
+        payment_model=payment_model,
         payment_mode=payment_mode,
         payment_status=ClientPaymentStatus.PENDING.value,
         reference_note=reference_note,

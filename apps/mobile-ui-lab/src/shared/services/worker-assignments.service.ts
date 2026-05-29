@@ -18,6 +18,8 @@ export type WorkerAssignment = {
   assigned_shift: string | null;
   salary_amount: number | null;
   notes: string | null;
+  start_date: string | null;
+  end_date: string | null;
   requirement: null | {
     id: number;
     category: string;

@@ -9,13 +9,18 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import Select from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { adminUsersService } from "@/services/admin-users.service";
+import {
+  adminUsersService,
+  PERMISSION_GROUP_LABELS,
+  type PermissionGroup,
+} from "@/services/admin-users.service";
 import { getErrorMessage } from "@/lib/get-error-message";
 
-const EMPTY = { email: "", name: "", password: "" };
+const EMPTY = { email: "", name: "", password: "", permission_group: "ops_admin" as PermissionGroup };
 
 export default function CreateAdminUserDialog({
   open,
@@ -30,8 +35,9 @@ export default function CreateAdminUserDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const set = (field: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm((prev) => ({ ...prev, [field]: e.target.value }));
+  const set = (field: keyof Pick<typeof EMPTY, "email" | "name" | "password">) =>
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setForm((prev) => ({ ...prev, [field]: e.target.value }));
 
   const handleClose = () => {
     setForm(EMPTY);
@@ -48,6 +54,7 @@ export default function CreateAdminUserDialog({
         email: form.email.trim().toLowerCase(),
         name: form.name.trim(),
         password: form.password,
+        permission_group: form.permission_group,
       });
       handleClose();
       onSuccess();
@@ -105,6 +112,18 @@ export default function CreateAdminUserDialog({
               required
               minLength={8}
               autoComplete="new-password"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="au-group">Permission group *</Label>
+            <Select
+              id="au-group"
+              value={form.permission_group}
+              onChange={(v) => setForm((prev) => ({ ...prev, permission_group: v as PermissionGroup }))}
+              options={(Object.entries(PERMISSION_GROUP_LABELS) as [PermissionGroup, string][]).map(
+                ([value, label]) => ({ value, label })
+              )}
             />
           </div>
 

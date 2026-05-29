@@ -7,9 +7,15 @@ import type {
   PayrollDeductionCreateResponse,
   PayrollRunStatusUpdatePayload,
   PayrollRunStatusUpdateResponse,
+  RecalculatePayrollItemResponse,
 } from "@/types/payroll";
 
 export const payrollService = {
+  listPayrollRuns: async () => {
+    const res = await http.get("/admin/payroll/runs");
+    return res.data;
+  },
+
   createPayrollRun: async (
     payload: PayrollRunCreatePayload
   ): Promise<PayrollRunCreateResponse> => {
@@ -17,17 +23,17 @@ export const payrollService = {
     return res.data;
   },
 
-  getPayrollRunDetail: async (
-    payrollRunId: number
-  ): Promise<PayrollRunDetailResponse> => {
-    const res = await http.get(`/admin/payroll/runs/${payrollRunId}`);
-    return res.data;
-  },
-
   generatePayrollRun: async (payrollRunId: number) => {
     const res = await http.post(
       `/admin/payroll/runs/${payrollRunId}/generate`
     );
+    return res.data;
+  },
+
+  getPayrollRunDetail: async (
+    payrollRunId: number
+  ): Promise<PayrollRunDetailResponse> => {
+    const res = await http.get(`/admin/payroll/runs/${payrollRunId}`);
     return res.data;
   },
 
@@ -50,6 +56,15 @@ export const payrollService = {
     const res = await http.patch(
       `/admin/payroll/runs/${payrollRunId}/status`,
       payload
+    );
+    return res.data;
+  },
+
+  recalculatePayrollItem: async (
+    payrollItemId: number
+  ): Promise<RecalculatePayrollItemResponse> => {
+    const res = await http.post(
+      `/admin/payroll/items/${payrollItemId}/recalculate`
     );
     return res.data;
   },

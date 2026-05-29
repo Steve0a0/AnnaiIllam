@@ -6,6 +6,7 @@ type StatusBadgeProps = {
 };
 
 const statusStyles: Record<string, string> = {
+  pending:           "bg-[#FEF3C7] text-[#B45309] border-[#FDE68A]",
   draft:             "bg-[#F5F5F4] text-[#78716C] border-[#E7E5E4]",
   submitted:         "bg-[#DBEAFE] text-[#1D4ED8] border-[#BFDBFE]",
   under_review:      "bg-[#EDE9FE] text-[#6D28D9] border-[#DDD6FE]",
@@ -29,11 +30,21 @@ const statusStyles: Record<string, string> = {
   corrected:         "bg-[#DBEAFE] text-[#1D4ED8] border-[#BFDBFE]",
   half_day:          "bg-[#FEF3C7] text-[#B45309] border-[#FDE68A]",
   absent:            "bg-[#FEE2E2] text-[#B91C1C] border-[#FECACA]",
+  no_show:           "bg-[#FEE2E2] text-[#B91C1C] border-[#FECACA]",
+  excused:           "bg-[#FEF3C7] text-[#B45309] border-[#FDE68A]",
   late:              "bg-[#FEF3C7] text-[#B45309] border-[#FDE68A]",
+  issued:            "bg-[#DBEAFE] text-[#1D4ED8] border-[#BFDBFE]",
+  paid:              "bg-[#DCFCE7] text-[#15803D] border-[#BBF7D0]",
+  failed:            "bg-[#FEE2E2] text-[#B91C1C] border-[#FECACA]",
+  processing:        "bg-[#FEF3C7] text-[#B45309] border-[#FDE68A]",
   open:              "bg-[#DBEAFE] text-[#1D4ED8] border-[#BFDBFE]",
   in_review:         "bg-[#EDE9FE] text-[#6D28D9] border-[#DDD6FE]",
   resolved:          "bg-[#DCFCE7] text-[#15803D] border-[#BBF7D0]",
   closed:            "bg-[#FEE2E2] text-[#B91C1C] border-[#FECACA]",
+  urgent:            "bg-[#FEE2E2] text-[#B91C1C] border-[#FECACA]",
+  high:              "bg-[#FEF3C7] text-[#B45309] border-[#FDE68A]",
+  medium:            "bg-[#DBEAFE] text-[#1D4ED8] border-[#BFDBFE]",
+  low:               "bg-[#F5F5F4] text-[#78716C] border-[#E7E5E4]",
 };
 
 const pulseDotStatuses = new Set(["checked_in", "in_progress"]);

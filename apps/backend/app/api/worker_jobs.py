@@ -21,7 +21,7 @@ router = APIRouter(prefix="/worker/jobs", tags=["Worker Jobs"])
 # Statuses that mean this job is open and accepting worker interest
 _OPEN_STATUSES = {
     RequirementStatus.APPROVED.value,
-    RequirementStatus.ASSIGNED.value,
+    RequirementStatus.WORKERS_ASSIGNED.value,
 }
 
 # Statuses that mean the worker already has an active assignment on this job
@@ -56,11 +56,11 @@ def _score_job_for_worker(requirement: Requirement, worker) -> tuple[int, list[s
                 score += 10
                 reasons.append("same state")
 
-    worker_skills = (worker.skills or "").lower()
-    if requirement.category and requirement.category.lower() in worker_skills:
+    worker_skills_str = " ".join(worker.skills or []).lower()
+    if requirement.category and requirement.category.lower() in worker_skills_str:
         score += 10
         reasons.append("skill match")
-    if requirement.subcategory and requirement.subcategory.lower() in worker_skills:
+    if requirement.subcategory and requirement.subcategory.lower() in worker_skills_str:
         score += 5
 
     return score, reasons

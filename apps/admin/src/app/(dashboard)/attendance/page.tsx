@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Search, X } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { CheckCircle2, LogOut, Pencil, XCircle, X } from "lucide-react";
 import PageHeader from "@/components/shared/page-header";
 import LoadingState from "@/components/shared/loading-state";
 import EmptyState from "@/components/shared/empty-state";
@@ -10,378 +10,41 @@ import ErrorState from "@/components/shared/error-state";
 import StatusBadge from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import CorrectAttendanceForm from "@/features/attendance/correct-attendance-form";
 import {
-  useAttendanceLookup,
-  type AttendanceLookupMode,
-} from "@/features/attendance/use-attendance-lookup";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import CorrectAttendanceForm from "@/features/attendance/correct-attendance-form";
 import { attendanceService } from "@/services/attendance.service";
 import { getErrorMessage } from "@/lib/get-error-message";
-import type { EnrichedAttendanceItem } from "@/types/attendance";
+import type { AttendanceItem } from "@/types/attendance";
 
-export default function AttendancePage() {
-  const queryClient = useQueryClient();
+// ── helpers ───────────────────────────────────────────────────────────────────
 
-  const [filterMode, setFilterMode] = useState<AttendanceLookupMode>("requirement");
-  const [inputValue, setInputValue] = useState("");
-  // committed search — triggers the query
-  const [searchId, setSearchId] = useState<number | null>(null);
-  const [activeMode, setActiveMode] = useState<AttendanceLookupMode>("requirement");
-
-  const [verifyingId, setVerifyingId] = useState<number | null>(null);
-  const [verifyError, setVerifyError] = useState<string | null>(null);
-  const [correctingRecord, setCorrectingRecord] =
-    useState<EnrichedAttendanceItem | null>(null);
-
-  const {
-    data: records = [],
-    isLoading,
-    isError,
-    error,
-    refetch,
-  } = useAttendanceLookup(searchId !== null ? activeMode : null, searchId);
-
-  function handleSearch(e: React.FormEvent) {
-    e.preventDefault();
-    const n = parseInt(inputValue.trim(), 10);
-    if (!n || n <= 0) return;
-    setSearchId(n);
-    setActiveMode(filterMode);
-    setVerifyError(null);
-  }
-
-  function handleModeSwitch(mode: AttendanceLookupMode) {
-    setFilterMode(mode);
-    setInputValue("");
-    setSearchId(null);
-    setVerifyError(null);
-  }
-
-  function handleClearInput() {
-    setInputValue("");
-    setSearchId(null);
-    setVerifyError(null);
-  }
-
-  async function handleVerify(record: EnrichedAttendanceItem) {
-    setVerifyingId(record.id);
-    setVerifyError(null);
-    try {
-      await attendanceService.correctAttendance(record.id, {
-        status: "approved",
-        notes: "Verified by admin.",
-      });
-      queryClient.invalidateQueries({
-        queryKey: ["attendance-lookup", activeMode, searchId],
-      });
-    } catch (err) {
-      setVerifyError(getErrorMessage(err));
-    } finally {
-      setVerifyingId(null);
-    }
-  }
-
-  function handleCorrectionSuccess() {
-    setCorrectingRecord(null);
-    queryClient.invalidateQueries({
-      queryKey: ["attendance-lookup", activeMode, searchId],
-    });
-  }
-
-  const hasSearch = searchId !== null;
-  const total = records.length;
-  const verified = records.filter((r) => r.status === "approved").length;
-  const absent = records.filter((r) => r.status === "absent").length;
-  const pending = total - verified - absent;
-
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Attendance"
-        description="View and verify worker attendance records by requirement or assignment."
-      />
-
-      {/* ── Filter bar ──────────────────────────────────────────────────── */}
-      <Card className="border-border bg-white shadow-sm">
-        <CardContent className="p-5">
-          <form
-            onSubmit={handleSearch}
-            className="flex flex-col gap-4 sm:flex-row sm:items-end"
-          >
-            {/* Mode toggle */}
-            <div className="flex shrink-0 gap-1 rounded-lg border border-input bg-muted/40 p-1">
-              {(["requirement", "assignment"] as AttendanceLookupMode[]).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => handleModeSwitch(m)}
-                  className={`rounded-md px-4 py-1.5 text-sm font-medium capitalize transition-colors ${
-                    filterMode === m
-                      ? "bg-white text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  By {m} ID
-                </button>
-              ))}
-            </div>
-
-            {/* ID input + submit */}
-            <div className="flex flex-1 gap-2">
-              <div className="relative flex-1 max-w-xs">
-                <Input
-                  type="number"
-                  min={1}
-                  placeholder={
-                    filterMode === "requirement"
-                      ? "Requirement ID e.g. 42"
-                      : "Assignment ID e.g. 18"
-                  }
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  className="pr-8"
-                />
-                {inputValue && (
-                  <button
-                    type="button"
-                    onClick={handleClearInput}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    aria-label="Clear"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
-              <Button type="submit" disabled={!inputValue.trim()} className="gap-1.5">
-                <Search className="h-4 w-4" />
-                Load
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-
-      {/* ── No search yet ───────────────────────────────────────────────── */}
-      {!hasSearch && (
-        <EmptyState
-          title="Enter an ID above to load records"
-          description="Search by Requirement ID to see all workers on a job, or by Assignment ID for a single worker-job pairing."
-        />
-      )}
-
-      {/* ── Loading ─────────────────────────────────────────────────────── */}
-      {hasSearch && isLoading && (
-        <LoadingState
-          title="Loading attendance"
-          description="Fetching records…"
-        />
-      )}
-
-      {/* ── Error ───────────────────────────────────────────────────────── */}
-      {hasSearch && isError && (
-        <ErrorState
-          title="Could not load attendance records"
-          description={getErrorMessage(error)}
-          onRetry={() => refetch()}
-        />
-      )}
-
-      {/* ── Verify error banner ─────────────────────────────────────────── */}
-      {verifyError && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {verifyError}
-        </div>
-      )}
-
-      {/* ── Results ─────────────────────────────────────────────────────── */}
-      {hasSearch && !isLoading && !isError && (
-        <>
-          {/* Summary strip */}
-          {total > 0 && (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <SummaryCard label="Total" value={total} tone="neutral" />
-              <SummaryCard label="Verified" value={verified} tone="success" />
-              <SummaryCard label="Pending review" value={pending} tone="warning" />
-              <SummaryCard label="Absent" value={absent} tone="danger" />
-            </div>
-          )}
-
-          {/* Empty results */}
-          {records.length === 0 ? (
-            <EmptyState
-              title="No attendance records found"
-              description={`No attendance has been recorded for ${activeMode} #${searchId} yet.`}
-            />
-          ) : (
-            <Card className="overflow-hidden border-border bg-white shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="min-w-full">
-                  <thead className="bg-muted/40">
-                    <tr>
-                      {[
-                        "Worker",
-                        "Date",
-                        "Assignment",
-                        "Check-in",
-                        "Check-out",
-                        "Hours",
-                        "Status",
-                        "Actions",
-                      ].map((h) => (
-                        <th
-                          key={h}
-                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground"
-                        >
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {records.map((record) => {
-                      const hours = calcHours(
-                        record.check_in_time,
-                        record.check_out_time
-                      );
-                      const isVerified = record.status === "approved";
-                      const isBusy = verifyingId === record.id;
-
-                      return (
-                        <tr
-                          key={record.id}
-                          className="transition-colors hover:bg-muted/30"
-                        >
-                          {/* Worker */}
-                          <td className="px-4 py-3">
-                            <p className="text-sm font-medium text-foreground">
-                              {record.worker_name}
-                            </p>
-                            <p className="font-mono text-xs text-muted-foreground">
-                              Profile #{record.worker_profile_id}
-                            </p>
-                          </td>
-
-                          {/* Date */}
-                          <td className="whitespace-nowrap px-4 py-3 font-mono text-sm text-foreground">
-                            {record.attendance_date}
-                          </td>
-
-                          {/* Assignment */}
-                          <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                            #{record.assignment_id}
-                          </td>
-
-                          {/* Check-in */}
-                          <td className="whitespace-nowrap px-4 py-3 font-mono text-sm text-foreground">
-                            {fmtTime(record.check_in_time)}
-                          </td>
-
-                          {/* Check-out */}
-                          <td className="whitespace-nowrap px-4 py-3 font-mono text-sm text-foreground">
-                            {fmtTime(record.check_out_time)}
-                          </td>
-
-                          {/* Hours */}
-                          <td className="px-4 py-3 font-mono text-sm text-foreground">
-                            {hours}
-                          </td>
-
-                          {/* Status */}
-                          <td className="px-4 py-3">
-                            <StatusBadge value={record.status} />
-                          </td>
-
-                          {/* Actions */}
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              {!isVerified && (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  disabled={isBusy || verifyingId !== null}
-                                  onClick={() => handleVerify(record)}
-                                  className="gap-1.5"
-                                >
-                                  <CheckCircle2 className="h-3.5 w-3.5" />
-                                  {isBusy ? "Saving…" : "Verify"}
-                                </Button>
-                              )}
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setCorrectingRecord(record)}
-                              >
-                                Correct
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Footer row count */}
-              <div className="border-t border-border px-4 py-3">
-                <p className="text-xs text-muted-foreground">
-                  {records.length} record{records.length !== 1 ? "s" : ""} for{" "}
-                  {activeMode} #{searchId}
-                </p>
-              </div>
-            </Card>
-          )}
-        </>
-      )}
-
-      {/* ── Correction dialog ────────────────────────────────────────────── */}
-      <Dialog
-        open={correctingRecord !== null}
-        onOpenChange={(open) => !open && setCorrectingRecord(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Correct attendance record</DialogTitle>
-            {correctingRecord && (
-              <DialogDescription>
-                {correctingRecord.worker_name} &middot;{" "}
-                {correctingRecord.attendance_date} &middot; Assignment #
-                {correctingRecord.assignment_id}
-              </DialogDescription>
-            )}
-          </DialogHeader>
-          {correctingRecord && (
-            <CorrectAttendanceForm
-              attendanceId={correctingRecord.id}
-              currentStatus={correctingRecord.status}
-              currentNotes={correctingRecord.notes}
-              onSuccess={handleCorrectionSuccess}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
+function todayISO() {
+  return new Date().toISOString().split("T")[0];
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmtTime(value: string | null) {
-  if (!value) return "—";
-  return new Intl.DateTimeFormat("en-IN", {
+function formatTime(iso: string | null) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleTimeString("en-IN", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
-  }).format(new Date(value));
+  });
 }
 
 function calcHours(checkIn: string | null, checkOut: string | null) {
@@ -390,6 +53,17 @@ function calcHours(checkIn: string | null, checkOut: string | null) {
     (new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 3_600_000;
   return diffH > 0 ? `${diffH.toFixed(1)}h` : "—";
 }
+
+const STATUS_OPTIONS = [
+  { label: "All", value: "" },
+  { label: "Present", value: "present" },
+  { label: "Absent", value: "absent" },
+  { label: "No-show", value: "no_show" },
+  { label: "Late", value: "late" },
+  { label: "Half day", value: "half_day" },
+  { label: "Corrected", value: "corrected" },
+  { label: "Excused", value: "excused" },
+];
 
 type SummaryTone = "neutral" | "success" | "warning" | "danger";
 
@@ -423,5 +97,454 @@ function SummaryCard({
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+// ── page ──────────────────────────────────────────────────────────────────────
+
+export default function AttendancePage() {
+  const queryClient = useQueryClient();
+
+  const [dateFilter, setDateFilter] = useState(todayISO());
+  const [requirementIdInput, setRequirementIdInput] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+
+  const [correctingRecord, setCorrectingRecord] = useState<AttendanceItem | null>(null);
+  const [rejectingRecord, setRejectingRecord] = useState<AttendanceItem | null>(null);
+  const [rejectNotes, setRejectNotes] = useState("");
+  const [rejectNotesError, setRejectNotesError] = useState("");
+  const [closingRecord, setClosingRecord] = useState<AttendanceItem | null>(null);
+  const [closeNotes, setCloseNotes] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const reqId =
+    requirementIdInput.trim() ? parseInt(requirementIdInput.trim(), 10) : undefined;
+  const queryParams = {
+    date: dateFilter || undefined,
+    requirement_id: reqId,
+    status: statusFilter || undefined,
+  };
+  const queryKey = ["attendance-list", queryParams];
+
+  const { data: response, isLoading, isError, error, refetch } = useQuery({
+    queryKey,
+    queryFn: () => attendanceService.listAll(queryParams),
+    staleTime: 30_000,
+  });
+  const records: AttendanceItem[] = response?.data ?? [];
+
+  const { mutate: approve, isPending: isApproving } = useMutation({
+    mutationFn: ({ id }: { id: number }) => attendanceService.approveAttendance(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+      setActionError(null);
+    },
+    onError: (err) => setActionError(getErrorMessage(err)),
+  });
+
+  const { mutate: reject, isPending: isRejecting } = useMutation({
+    mutationFn: ({ id, notes }: { id: number; notes: string }) =>
+      attendanceService.rejectAttendance(id, notes),
+    onSuccess: () => {
+      setRejectingRecord(null);
+      setRejectNotes("");
+      queryClient.invalidateQueries({ queryKey });
+      setActionError(null);
+    },
+    onError: (err) => setActionError(getErrorMessage(err)),
+  });
+
+  const { mutate: closeShift, isPending: isClosingShift } = useMutation({
+    mutationFn: ({ id, notes }: { id: number; notes: string }) =>
+      attendanceService.closeShift(id, notes || undefined),
+    onSuccess: () => {
+      setClosingRecord(null);
+      setCloseNotes("");
+      queryClient.invalidateQueries({ queryKey });
+      setActionError(null);
+    },
+    onError: (err) => setActionError(getErrorMessage(err)),
+  });
+
+  function handleCloseShiftSubmit() {
+    if (!closingRecord) return;
+    closeShift({ id: closingRecord.id, notes: closeNotes.trim() });
+  }
+
+  function handleCorrectionSuccess() {
+    setCorrectingRecord(null);
+    queryClient.invalidateQueries({ queryKey });
+  }
+
+  function handleRejectSubmit() {
+    if (!rejectingRecord) return;
+    if (!rejectNotes.trim()) {
+      setRejectNotesError("Rejection reason is required.");
+      return;
+    }
+    setRejectNotesError("");
+    reject({ id: rejectingRecord.id, notes: rejectNotes.trim() });
+  }
+
+  const total = records.length;
+  const approvedCount = records.filter((r) => r.approval_status === "approved").length;
+  const rejectedCount = records.filter((r) => r.approval_status === "rejected").length;
+  const pendingApproval = records.filter((r) => !r.approval_status || r.approval_status === "pending").length;
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Attendance"
+        description="Reconcile daily attendance across all active jobs."
+      />
+
+      {/* ── Filter bar ──────────────────────────────────────────────────── */}
+      <Card className="border-border bg-white shadow-sm">
+        <CardHeader className="pb-3 pt-5 px-5">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Filters</CardTitle>
+        </CardHeader>
+        <CardContent className="px-5 pb-5 space-y-4">
+          {/* Row 1: Date + Requirement ID */}
+          <div className="flex flex-wrap gap-3 items-end">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Date</label>
+              <Input
+                type="date"
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value)}
+                className="w-44"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                Requirement ID
+              </label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  min={1}
+                  placeholder="e.g. 42"
+                  value={requirementIdInput}
+                  onChange={(e) => setRequirementIdInput(e.target.value)}
+                  className="w-36 pr-7"
+                />
+                {requirementIdInput && (
+                  <button
+                    type="button"
+                    onClick={() => setRequirementIdInput("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    aria-label="Clear"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Row 2: Status buttons */}
+          <div className="flex flex-wrap gap-1">
+            {STATUS_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setStatusFilter(opt.value)}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  statusFilter === opt.value
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-input bg-background text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Loading ─────────────────────────────────────────────────────── */}
+      {isLoading && (
+        <LoadingState title="Loading attendance" description="Fetching records…" />
+      )}
+
+      {/* ── Error ───────────────────────────────────────────────────────── */}
+      {!isLoading && isError && (
+        <ErrorState
+          title="Could not load attendance records"
+          description={error ? getErrorMessage(error) : "Please try again."}
+          onRetry={() => refetch()}
+        />
+      )}
+
+      {/* ── Action error banner ─────────────────────────────────────────── */}
+      {actionError && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {actionError}
+        </div>
+      )}
+
+      {/* ── Results ─────────────────────────────────────────────────────── */}
+      {!isLoading && !isError && (
+        <>
+          {total > 0 && (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <SummaryCard label="Total" value={total} tone="neutral" />
+              <SummaryCard label="Approved" value={approvedCount} tone="success" />
+              <SummaryCard label="Pending approval" value={pendingApproval} tone="warning" />
+              <SummaryCard label="Rejected" value={rejectedCount} tone="danger" />
+            </div>
+          )}
+
+          {records.length === 0 ? (
+            <EmptyState
+              title="No attendance records"
+              description={`No records for ${dateFilter || "today"}${reqId ? ` on requirement #${reqId}` : ""}${statusFilter ? ` with status "${statusFilter}"` : ""}.`}
+            />
+          ) : (
+            <Card className="border-border bg-white shadow-sm">
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Worker</TableHead>
+                      <TableHead className="hidden sm:table-cell">Req</TableHead>
+                      <TableHead className="hidden md:table-cell">Assignment</TableHead>
+                      <TableHead className="hidden lg:table-cell">Check-in</TableHead>
+                      <TableHead className="hidden lg:table-cell">Check-out</TableHead>
+                      <TableHead className="hidden lg:table-cell">Hours</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="hidden sm:table-cell">Approval</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {records.map((record) => (
+                      <TableRow key={record.id}>
+                        <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                          {record.attendance_date}
+                        </TableCell>
+                        <TableCell className="font-medium">{record.worker_name}</TableCell>
+                        <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
+                          {record.requirement_id ? `#${record.requirement_id}` : "—"}
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
+                          #{record.assignment_id}
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
+                          {formatTime(record.check_in_time)}
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
+                          {formatTime(record.check_out_time)}
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
+                          {calcHours(record.check_in_time, record.check_out_time)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <StatusBadge value={record.status} />
+                            {record.check_in_time && !record.check_out_time && (
+                              <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                                Open Shift
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="hidden sm:table-cell">
+                          {record.approval_status ? (
+                            <StatusBadge value={record.approval_status} />
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex gap-1 justify-end">
+                            {record.approval_status !== "approved" && record.approval_status !== "rejected" && (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 px-2 gap-1 text-xs"
+                                  disabled={isApproving}
+                                  onClick={() => approve({ id: record.id })}
+                                >
+                                  <CheckCircle2 className="h-3.5 w-3.5" />
+                                  Approve
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 px-2 gap-1 text-xs text-destructive border-destructive/40 hover:bg-destructive/10"
+                                  disabled={isRejecting}
+                                  onClick={() => {
+                                    setRejectingRecord(record);
+                                    setRejectNotes("");
+                                    setRejectNotesError("");
+                                  }}
+                                >
+                                  <XCircle className="h-3.5 w-3.5" />
+                                  Reject
+                                </Button>
+                              </>
+                            )}
+                            {record.check_in_time && !record.check_out_time && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 px-2 gap-1 text-xs text-amber-700 border-amber-300 hover:bg-amber-50"
+                                onClick={() => { setClosingRecord(record); setCloseNotes(""); }}
+                              >
+                                <LogOut className="h-3.5 w-3.5" />
+                                Close Shift
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2 gap-1 text-xs"
+                              onClick={() => setCorrectingRecord(record)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              Correct
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+
+      {/* ── Correction dialog ────────────────────────────────────────────── */}
+      <Dialog
+        open={correctingRecord !== null}
+        onOpenChange={(open) => !open && setCorrectingRecord(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit attendance record</DialogTitle>
+            {correctingRecord && (
+              <DialogDescription>
+                {correctingRecord.worker_name} &middot;{" "}
+                {correctingRecord.attendance_date} &middot; Assignment #
+                {correctingRecord.assignment_id}
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          {correctingRecord && (
+            <CorrectAttendanceForm
+              attendanceId={correctingRecord.id}
+              currentStatus={correctingRecord.status}
+              currentNotes={correctingRecord.notes}
+              onSuccess={handleCorrectionSuccess}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Close Shift dialog ──────────────────────────────────────────── */}
+      <Dialog
+        open={closingRecord !== null}
+        onOpenChange={(open) => { if (!open) { setClosingRecord(null); setCloseNotes(""); } }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Close open shift</DialogTitle>
+            {closingRecord && (
+              <DialogDescription>
+                {closingRecord.worker_name} &middot;{" "}
+                {closingRecord.attendance_date} &middot; Checked in at{" "}
+                {formatTime(closingRecord.check_in_time)}
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">
+                Admin notes <span className="text-muted-foreground">(optional)</span>
+              </label>
+              <textarea
+                className="min-h-20 w-full rounded-lg border border-input bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                value={closeNotes}
+                onChange={(e) => setCloseNotes(e.target.value)}
+                placeholder="Reason for manually closing this shift"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => { setClosingRecord(null); setCloseNotes(""); }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={isClosingShift}
+              onClick={handleCloseShiftSubmit}
+            >
+              {isClosingShift ? "Closing…" : "Close shift"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Reject dialog ───────────────────────────────────────────────── */}
+      <Dialog
+        open={rejectingRecord !== null}
+        onOpenChange={(open) => { if (!open) { setRejectingRecord(null); setRejectNotes(""); setRejectNotesError(""); } }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject attendance record</DialogTitle>
+            {rejectingRecord && (
+              <DialogDescription>
+                {rejectingRecord.worker_name} &middot;{" "}
+                {rejectingRecord.attendance_date} &middot; Assignment #
+                {rejectingRecord.assignment_id}
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">
+                Reason for rejection <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                className="min-h-20 w-full rounded-lg border border-input bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                value={rejectNotes}
+                onChange={(e) => setRejectNotes(e.target.value)}
+                placeholder="Explain why this attendance record is being rejected"
+              />
+              {rejectNotesError && (
+                <p className="mt-1 text-xs text-red-600">{rejectNotesError}</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => { setRejectingRecord(null); setRejectNotes(""); setRejectNotesError(""); }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={isRejecting}
+              onClick={handleRejectSubmit}
+            >
+              {isRejecting ? "Rejecting…" : "Reject"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

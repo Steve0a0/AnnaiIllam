@@ -9,6 +9,9 @@ export type AssignmentItem = {
   assigned_shift: string | null;
   salary_amount: number | null;
   notes: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  response_deadline: string | null;
 };
 
 export type GlobalAssignmentItem = {
@@ -54,15 +57,8 @@ export type CreateAssignmentPayload = {
   assigned_shift?: string | null;
   salary_amount?: number | null;
   notes?: string | null;
-};
-
-export type CreateAssignmentResponse = {
-  success: boolean;
-  message: string;
-  data: {
-    assignment_id: number;
-    status: string;
-  };
+  start_date?: string | null;
+  end_date?: string | null;
 };
 
 export type UpdateAssignmentStatusPayload = {
@@ -75,6 +71,20 @@ export type UpdateAssignmentStatusResponse = {
   data: {
     assignment_id: number;
     status: string;
+  };
+};
+
+export type CreateAssignmentResponse = {
+  success: boolean;
+  message: string;
+  data: {
+    assignment_id: number;
+    status: string;
+    warning: {
+      code: string;
+      message: string;
+      documents: Array<{ document_type: string; expiry_date: string }>;
+    } | null;
   };
 };
 
@@ -98,10 +108,22 @@ export type WorkerMatch = {
     duration_days: number;
     status: string;
   };
+  expired_documents: Array<{ document_type: string; expiry_date: string }>;
 };
 
 export type WorkerMatchesResponse = {
   success: boolean;
   message: string;
   data: WorkerMatch[];
+};
+
+export type ReplaceWorkerResponse = {
+  success: boolean;
+  message: string;
+  data: {
+    old_assignment_id: number;
+    old_assignment_status: string;
+    new_assignment_id: number;
+    new_assignment_status: string;
+  };
 };

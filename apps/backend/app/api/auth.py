@@ -160,7 +160,8 @@ def verify_otp(payload: OtpVerifySchema, db: Session = Depends(get_db)):
 
 @router.post("/admin/login")
 def admin_login(payload: AdminLoginSchema, db: Session = Depends(get_db)):
-    check_rate_limit(f"admin_login:{payload.email}", limit=10, window_seconds=300)
+    # 5 attempts per 5 minutes — stricter than OTP to protect the password-based admin login.
+    check_rate_limit(f"admin_login:{payload.email}", limit=5, window_seconds=300)
 
     user = get_user_by_email(db, payload.email)
     # Generic error avoids leaking which emails have admin accounts

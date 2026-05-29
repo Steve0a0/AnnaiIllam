@@ -49,7 +49,7 @@ class WorkerProfileCreateSchema(BaseModel):
     state: str = Field(min_length=2, max_length=100)
     address: str | None = Field(default=None, max_length=1000)
     date_of_birth: date | None = None
-    skills: str | None = Field(default=None, max_length=2000)
+    skills: list[str] | None = Field(default=None, max_length=20)
     experience_notes: str | None = Field(default=None, max_length=5000)
 
 
@@ -90,11 +90,11 @@ class WorkerProfileUpdateSchema(BaseModel):
     state: str | None = Field(default=None, min_length=2, max_length=100)
     address: str | None = Field(default=None, max_length=1000)
     date_of_birth: date | None = None
-    skills: str | None = Field(default=None, max_length=2000)
+    skills: list[str] | None = Field(default=None, max_length=20)
     experience_notes: str | None = Field(default=None, max_length=5000)
     is_available: bool | None = None
-    available_days: str | None = Field(default=None, max_length=100)
-    available_shifts: str | None = Field(default=None, max_length=100)
+    available_days: list[str] | None = None
+    available_shifts: list[str] | None = None
 
 
 class WorkerDocumentCreateSchema(BaseModel):
@@ -131,11 +131,25 @@ class WorkerDocumentCreateSchema(BaseModel):
         return strip_optional_text(value)
 
 
+_ALLOWED_PERMISSION_GROUPS = {"super_admin", "ops_admin", "finance_admin", "viewer"}
+
+
 class AdminProfileCreateSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     full_name: str = Field(min_length=2, max_length=255)
     department: str | None = Field(default=None, max_length=100)
+    permission_group: str = Field(default="ops_admin", max_length=50)
+
+    @field_validator("permission_group")
+    @classmethod
+    def validate_permission_group(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in _ALLOWED_PERMISSION_GROUPS:
+            raise ValueError(
+                f"permission_group must be one of: {', '.join(sorted(_ALLOWED_PERMISSION_GROUPS))}"
+            )
+        return normalized
 
 
 class AdminProfileUpdateSchema(BaseModel):
@@ -143,3 +157,16 @@ class AdminProfileUpdateSchema(BaseModel):
 
     full_name: str | None = Field(default=None, min_length=2, max_length=255)
     department: str | None = Field(default=None, max_length=100)
+    permission_group: str | None = Field(default=None, max_length=50)
+
+    @field_validator("permission_group")
+    @classmethod
+    def validate_permission_group(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if normalized not in _ALLOWED_PERMISSION_GROUPS:
+            raise ValueError(
+                f"permission_group must be one of: {', '.join(sorted(_ALLOWED_PERMISSION_GROUPS))}"
+            )
+        return normalized

@@ -12,6 +12,7 @@ class PayrollRunCreateSchema(BaseModel):
     period_start: date
     period_end: date
     notes: str | None = Field(default=None, max_length=1000)
+    require_verified_attendance: bool = False
 
     @field_validator("notes")
     @classmethod

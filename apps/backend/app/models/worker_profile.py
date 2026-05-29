@@ -1,7 +1,7 @@
 ﻿from datetime import date, datetime
 from app.utils.time import utcnow
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -21,13 +21,12 @@ class WorkerProfile(Base):
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
 
-    skills: Mapped[str | None] = mapped_column(Text, nullable=True)
+    skills: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     experience_years: Mapped[str | None] = mapped_column(String(50), nullable=True)  # e.g. "1–2 years"
     experience_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Availability stored as comma-separated values for simplicity
-    available_days: Mapped[str | None] = mapped_column(String(100), nullable=True)   # e.g. "Mon,Tue,Wed"
-    available_shifts: Mapped[str | None] = mapped_column(String(100), nullable=True) # e.g. "Morning,Evening"
+    available_days: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    available_shifts: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
     verification_status: Mapped[str] = mapped_column(String(50), default="pending", index=True)

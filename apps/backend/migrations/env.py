@@ -18,8 +18,12 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 database_url = os.environ.get("DATABASE_URL")
-if database_url:
-    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+if not database_url:
+    raise ValueError(
+        "DATABASE_URL environment variable is not set. "
+        "Example: DATABASE_URL=postgresql+psycopg://user:pass@host:5432/dbname alembic upgrade head"
+    )
+config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 # add your model's MetaData object here
 # for 'autogenerate' support

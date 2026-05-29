@@ -1,7 +1,7 @@
 ﻿from datetime import datetime
 from app.utils.time import utcnow
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -35,6 +35,10 @@ class PayrollItem(Base):
     attendance_days: Mapped[int] = mapped_column(Integer, default=0)
     half_days: Mapped[int] = mapped_column(Integer, default=0)
     absent_days: Mapped[int] = mapped_column(Integer, default=0)
+
+    platform_margin: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    is_stale: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     payment_status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
 

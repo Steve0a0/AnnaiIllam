@@ -49,6 +49,7 @@ def get_my_admin_profile(
             "id": profile.id,
             "full_name": profile.full_name,
             "department": profile.department,
+            "permission_group": profile.permission_group,
         },
     )
 

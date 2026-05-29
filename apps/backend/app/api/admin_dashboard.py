@@ -2,18 +2,20 @@
 from app.utils.time import utcnow
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.roles import require_role
 from app.core.roles import UserRole
 from app.db.deps import get_db
+from app.models.attendance import Attendance
+from app.models.client_payment import ClientPayment
 from app.models.user import User
 from app.repositories.assignment_repository import count_active_assignments, count_assignments, get_active_assignments
 from app.repositories.attendance_repository import (
     count_absent_attendance,
     count_attendance_records,
     count_present_attendance,
-    get_attendance_for_assignment_on_date,
 )
 from app.repositories.complaint_repository import count_all_complaints, count_open_complaints, get_all_complaints
 from app.repositories.payment_repository import (
@@ -21,7 +23,6 @@ from app.repositories.payment_repository import (
     count_worker_payouts,
     sum_client_payments_paid,
     sum_worker_payouts_paid,
-    get_client_payments_by_client_id,
 )
 from app.repositories.payroll_repository import count_payroll_items, count_payroll_runs
 from app.repositories.profile_repository import count_available_workers, count_workers
@@ -101,35 +102,56 @@ def get_dashboard_alerts(
         <= now - timedelta(hours=sla_policy_map.get(item.severity, sla_policy_map["medium"])["resolution_hours"])
     ]
 
-    missing_attendance = []
-    for assignment in active_assignments:
-        if not get_attendance_for_assignment_on_date(db, assignment.id, today):
-            missing_attendance.append(
-                {
-                    "assignment_id": assignment.id,
-                    "worker_profile_id": assignment.worker_profile_id,
-                    "requirement_id": assignment.requirement_id,
-                    "status": assignment.status,
-                }
-            )
-
-    unpaid_requirements = []
-    for requirement in requirements:
-        payments = get_client_payments_by_client_id(db, requirement.client_id)
-        pending = sum(
-            payment.amount
-            for payment in payments
-            if payment.requirement_id == requirement.id and payment.payment_status != "paid"
+    # Batch-fetch all attendance records for today's active assignments in a single query
+    # to avoid N+1 (one query per assignment).
+    active_assignment_ids = [a.id for a in active_assignments]
+    if active_assignment_ids:
+        checked_in_today = set(
+            db.execute(
+                select(Attendance.assignment_id).where(
+                    Attendance.assignment_id.in_(active_assignment_ids),
+                    Attendance.attendance_date == today,
+                )
+            ).scalars().all()
         )
-        if pending > 0:
-            unpaid_requirements.append(
-                {
-                    "requirement_id": requirement.id,
-                    "client_id": requirement.client_id,
-                    "pending_amount": pending,
-                    "status": requirement.status,
-                }
-            )
+    else:
+        checked_in_today = set()
+
+    missing_attendance = [
+        {
+            "assignment_id": assignment.id,
+            "worker_profile_id": assignment.worker_profile_id,
+            "requirement_id": assignment.requirement_id,
+            "status": assignment.status,
+        }
+        for assignment in active_assignments
+        if assignment.id not in checked_in_today
+    ]
+
+    # Batch-fetch pending payment totals per requirement in a single aggregate query
+    # to avoid N+1 (one query per requirement).
+    requirement_ids = [r.id for r in requirements]
+    if requirement_ids:
+        pending_rows = db.execute(
+            select(ClientPayment.requirement_id, func.sum(ClientPayment.amount)).where(
+                ClientPayment.requirement_id.in_(requirement_ids),
+                ClientPayment.payment_status != "paid",
+            ).group_by(ClientPayment.requirement_id)
+        ).all()
+        pending_by_req = {row[0]: row[1] for row in pending_rows}
+    else:
+        pending_by_req = {}
+
+    unpaid_requirements = [
+        {
+            "requirement_id": requirement.id,
+            "client_id": requirement.client_id,
+            "pending_amount": pending_by_req[requirement.id],
+            "status": requirement.status,
+        }
+        for requirement in requirements
+        if pending_by_req.get(requirement.id, 0) > 0
+    ]
 
     return success_response(
         "Dashboard alerts fetched successfully",

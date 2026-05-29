@@ -64,8 +64,8 @@ type WorkerFullProfile = {
   date_of_birth: string | null;
   skills: string[] | null;
   experience_notes: string | null;
-  available_days: string | null;
-  available_shifts: string | null;
+  available_days: string[] | null;
+  available_shifts: string[] | null;
   is_available: boolean;
   verification_status: string;
   documents: {
@@ -405,13 +405,13 @@ export default function ProfileScreen() {
                 <Divider />
                 <InfoRow
                   label="Working days"
-                  value={profile.available_days ?? 'Not set'}
+                  value={profile.available_days?.join(', ') || 'Not set'}
                   icon={<CalendarDays size={14} color={C.neutral500} />}
                 />
                 <Divider />
                 <InfoRow
                   label="Preferred shifts"
-                  value={profile.available_shifts ?? 'Not set'}
+                  value={profile.available_shifts?.join(', ') || 'Not set'}
                 />
               </YStack>
             </YStack>

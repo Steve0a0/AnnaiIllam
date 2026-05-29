@@ -4,15 +4,15 @@ type Envelope<T> = { success: boolean; message: string; data: T };
 
 export type WorkerProfilePatch = {
   is_available?: boolean;
-  available_days?: string | null;
-  available_shifts?: string | null;
+  available_days?: string[] | null;
+  available_shifts?: string[] | null;
 };
 
 export type WorkerProfileSummary = {
   id: number;
   is_available: boolean;
-  available_days: string | null;
-  available_shifts: string | null;
+  available_days: string[] | null;
+  available_shifts: string[] | null;
 };
 
 export const workerProfileService = {

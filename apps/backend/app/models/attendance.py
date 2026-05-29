@@ -44,5 +44,17 @@ class Attendance(Base):
 
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Approval workflow — admin must approve/reject before record is billable
+    approval_status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
+    approved_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    approval_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Unclosed check-in alerting — tracks when admin was last notified
+    last_alert_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

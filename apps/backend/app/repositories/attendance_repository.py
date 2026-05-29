@@ -63,6 +63,27 @@ def get_attendance_for_worker(
     return list(db.execute(stmt).scalars().all())
 
 
+def get_attendance_for_worker_paginated(
+    db: Session,
+    worker_profile_id: int,
+    page: int,
+    limit: int,
+) -> tuple[list[Attendance], int]:
+    """Returns (records, total_count) for the given page."""
+    base = select(Attendance).where(Attendance.worker_profile_id == worker_profile_id)
+    total = db.execute(select(func.count()).select_from(base.subquery())).scalar_one()
+    records = list(
+        db.execute(
+            base.order_by(Attendance.attendance_date.desc())
+            .offset((page - 1) * limit)
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+    return records, total
+
+
 def get_attendance_for_assignment(
     db: Session,
     assignment_id: int,

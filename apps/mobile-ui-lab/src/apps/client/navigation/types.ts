@@ -32,6 +32,7 @@ export type HomeStackParamList = {
   };
   PaymentConfirm: { invoiceId: number; utrRef: string; amount: number; isGatewayPayment?: boolean };
   RateRequirement: { requirementId: number; category: string };
+  RaiseDispute: { requirementId: number };
 };
 
 export type JobsStackParamList = {
@@ -52,6 +53,7 @@ export type JobsStackParamList = {
   };
   PaymentConfirm: { invoiceId: number; utrRef: string; amount: number; isGatewayPayment?: boolean };
   RateRequirement: { requirementId: number; category: string };
+  RaiseDispute: { requirementId: number };
 };
 
 export type ComplaintsStackParamList = {

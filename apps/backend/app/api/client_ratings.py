@@ -8,6 +8,7 @@ from app.core.roles import UserRole
 from app.db.deps import get_db
 from app.models.client_rating import ClientRating
 from app.models.user import User
+from app.repositories.client_repository import get_client_profile_by_user_id
 from app.repositories.requirement_repository import get_requirement_by_id
 from app.utils.audit import audit_event
 from app.utils.response import success_response
@@ -30,11 +31,12 @@ def create_client_rating(
     db: Session = Depends(get_db),
 ):
     """Client submits a rating for a requirement (and optionally a specific worker/assignment)."""
-    requirement = get_requirement_by_id(db, payload.requirement_id)
-    if not requirement:
-        raise HTTPException(status_code=404, detail="Requirement not found")
+    client_profile = get_client_profile_by_user_id(db, current_user.id)
+    if not client_profile:
+        raise HTTPException(status_code=404, detail="Client profile not found")
 
-    if requirement.client_id != current_user.id:
+    requirement = get_requirement_by_id(db, payload.requirement_id)
+    if not requirement or requirement.client_id != client_profile.id:
         raise HTTPException(status_code=403, detail="You can only rate your own requirements")
 
     existing = db.execute(

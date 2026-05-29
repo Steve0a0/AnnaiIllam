@@ -113,7 +113,7 @@ def requirement(db, client_profile, client_user):
         duration_days=30,
         shift_details="Night 20:00-06:00",
         budget_amount=30000,
-        status=RequirementStatus.ASSIGNED.value,
+        status=RequirementStatus.WORKERS_ASSIGNED.value,
         created_by_user_id=client_user.id,
     )
     db.add(req)
@@ -339,7 +339,7 @@ class TestClientComplaintCreation:
             duration_days=5,
             shift_details="Day",
             budget_amount=5000,
-            status=RequirementStatus.ASSIGNED.value,
+            status=RequirementStatus.WORKERS_ASSIGNED.value,
             created_by_user_id=client_profile.user_id,
         )
         db.add(req2)
@@ -969,3 +969,218 @@ class TestSlaBreachDetection:
         assert sla["response_breached"] is True
         assert sla["resolution_breached"] is True
         assert sla["age_hours"] >= 99.0
+
+# ──────────────────────────────────────────────────────────────────
+# Admin Replacement Creation — Worker Picker Flow (P1 Item 10)
+#
+# Covers the API side of the new worker-picker replacement form:
+# 1. Worker matches endpoint returns eligible workers (picker source).
+# 2. Unavailable worker appears with is_available=False (picker shows as blocked).
+# 3. Admin creates replacement using worker_profile_id from matches list.
+# 4. Backend rejects replacement for an unavailable worker (400).
+# 5. Backend rejects replacement when worker is already assigned (400).
+# 6. Non-admin cannot create an admin replacement (403).
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestAdminReplacementCreation:
+    """Tests that back the worker-picker replacement form (P1 Item 10).
+
+    The frontend picker calls GET /admin/assignments/requirement/{id}/matches
+    to populate the worker list, then submits POST /admin/replacements with the
+    selected worker_profile_id.  These tests verify that both endpoints behave
+    correctly so the picker can rely on them.
+    """
+
+    @pytest.fixture
+    def new_worker_profile(self, db):
+        """A second approved, available worker who can be selected as replacement."""
+        from app.models.user import User
+
+        user = User(
+            phone="9100000099",
+            role="worker",
+            is_active=True,
+            is_phone_verified=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        profile = WorkerProfile(
+            user_id=user.id,
+            full_name="Sundar Pichai",
+            category="Security",
+            subcategory="Day Guard",
+            city="Chennai",
+            state="Tamil Nadu",
+            address="Anna Nagar",
+            skills="Security",
+            available_shifts="Day",
+            is_available=True,
+            verification_status="approved",
+        )
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+        return profile
+
+    @pytest.fixture
+    def unavailable_worker_profile(self, db):
+        """An unavailable worker — should appear blocked in the picker."""
+        from app.models.user import User
+
+        user = User(
+            phone="9100000098",
+            role="worker",
+            is_active=True,
+            is_phone_verified=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        profile = WorkerProfile(
+            user_id=user.id,
+            full_name="Blocked Worker",
+            category="Security",
+            city="Chennai",
+            state="Tamil Nadu",
+            address="Guindy",
+            skills="Security",
+            is_available=False,
+            verification_status="approved",
+        )
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+        return profile
+
+    def test_worker_matches_returns_eligible_workers(
+        self, client, admin_headers, requirement, new_worker_profile
+    ):
+        """GET /admin/assignments/requirement/{id}/matches returns worker list for picker."""
+        response = client.get(
+            f"{BASE}/admin/assignments/requirement/{requirement.id}/matches",
+            headers=admin_headers,
+        )
+        assert response.status_code == 200
+        workers = response.json()["data"]
+        assert isinstance(workers, list)
+        assert len(workers) > 0
+        # Each entry must have the fields the picker uses
+        for w in workers:
+            assert "worker_profile_id" in w
+            assert "full_name" in w
+            assert "category" in w
+            assert "city" in w
+            assert "is_available" in w
+            assert "verification_status" in w
+
+    def test_unavailable_worker_appears_with_is_available_false(
+        self, client, admin_headers, requirement, unavailable_worker_profile
+    ):
+        """Unavailable workers are returned by the matches endpoint with is_available=False.
+
+        The frontend uses this flag to move the worker into the 'blocked' group —
+        they are shown but cannot be selected in the picker.
+        """
+        response = client.get(
+            f"{BASE}/admin/assignments/requirement/{requirement.id}/matches",
+            headers=admin_headers,
+        )
+        assert response.status_code == 200
+        workers = response.json()["data"]
+        blocked = [
+            w for w in workers
+            if w["worker_profile_id"] == unavailable_worker_profile.id
+        ]
+        assert len(blocked) == 1
+        assert blocked[0]["is_available"] is False
+
+    def test_admin_creates_replacement_using_selected_worker(
+        self, client, db, admin_headers, requirement, assignment, open_complaint, new_worker_profile
+    ):
+        """Admin submits the picker selection → replacement is created successfully."""
+        response = client.post(
+            f"{BASE}/admin/replacements",
+            json={
+                "complaint_id": open_complaint.id,
+                "old_assignment_id": assignment.id,
+                "new_worker_profile_id": new_worker_profile.id,
+                "reason": "Worker replaced via picker.",
+            },
+            headers=admin_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert "replacement_id" in data
+        assert "new_assignment_id" in data
+        assert data["new_assignment_id"] is not None
+
+    def test_replacement_fails_for_unavailable_worker(
+        self, client, admin_headers, requirement, assignment, open_complaint, unavailable_worker_profile
+    ):
+        """Backend blocks replacement if selected worker is unavailable.
+
+        The picker hides unavailable workers, but the backend enforces this too
+        as a safety guard.
+        """
+        response = client.post(
+            f"{BASE}/admin/replacements",
+            json={
+                "complaint_id": open_complaint.id,
+                "old_assignment_id": assignment.id,
+                "new_worker_profile_id": unavailable_worker_profile.id,
+                "reason": "Attempting to assign unavailable worker.",
+            },
+            headers=admin_headers,
+        )
+        assert response.status_code == 400
+        assert "not available" in response.json()["message"].lower()
+
+    def test_replacement_fails_if_worker_already_assigned(
+        self, client, db, admin_headers, requirement, assignment, open_complaint, new_worker_profile, admin_user
+    ):
+        """Backend rejects replacement if the chosen worker already has an active assignment on this requirement."""
+        from app.models.assignment import Assignment as AssignmentModel
+
+        # Pre-assign the new worker to the same requirement
+        existing = AssignmentModel(
+            requirement_id=requirement.id,
+            worker_profile_id=new_worker_profile.id,
+            assigned_by_user_id=admin_user.id,
+            status=AssignmentStatus.ACCEPTED.value,
+            assigned_role="Guard",
+            assigned_shift="Day",
+            salary_amount=400,
+        )
+        db.add(existing)
+        db.commit()
+
+        response = client.post(
+            f"{BASE}/admin/replacements",
+            json={
+                "complaint_id": open_complaint.id,
+                "old_assignment_id": assignment.id,
+                "new_worker_profile_id": new_worker_profile.id,
+                "reason": "Worker already assigned — should fail.",
+            },
+            headers=admin_headers,
+        )
+        assert response.status_code == 400
+        assert "already assigned" in response.json()["message"].lower()
+
+    def test_non_admin_cannot_create_replacement(
+        self, client, client_headers, client_profile, requirement, assignment, open_complaint, new_worker_profile
+    ):
+        """Worker and client roles are blocked from the admin replacement endpoint."""
+        response = client.post(
+            f"{BASE}/admin/replacements",
+            json={
+                "complaint_id": open_complaint.id,
+                "old_assignment_id": assignment.id,
+                "new_worker_profile_id": new_worker_profile.id,
+                "reason": "Unauthorized replacement attempt.",
+            },
+            headers=client_headers,
+        )
+        assert response.status_code == 403

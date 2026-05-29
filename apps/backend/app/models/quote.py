@@ -20,6 +20,11 @@ class Quote(Base):
     payment_model: Mapped[str] = mapped_column(String(50))
     valid_until: Mapped[date | None] = mapped_column(Date, nullable=True)
 
+    # Extension quotes — quote_type distinguishes a standard quote from a job
+    # extension quote sent after the job is already in_progress.
+    quote_type: Mapped[str] = mapped_column(String(50), default="standard")
+    extension_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     terms_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     internal_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 

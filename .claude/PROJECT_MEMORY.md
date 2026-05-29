@@ -11,9 +11,9 @@
 - Admin complaint detail route exists at `apps/admin/src/app/(dashboard)/complaints/[id]/page.tsx`; resolution controls live in `apps/admin/src/features/complaints/update-complaint-status-form.tsx`.
 - Admin report sub-pages exist at `/reports/requirements`, `/reports/assignments`, and `/reports/complaints`; filters use `apps/admin/src/features/reports/report-filters.tsx` and backend query params in `apps/backend/app/api/admin_reports.py`.
 - Requirements and quote integration coverage lives in `apps/backend/tests/test_requirements.py`; it covers client create/list/detail, admin review, quote create, approve/reject, ownership, role checks, duplicate quote, and invalid transitions.
-- Assignment integration coverage lives in `apps/backend/tests/test_assignments.py`; it covers admin create/list/filter/status updates, worker accept/decline, ownership, role checks, payment/availability gates, and duplicate active assignment rejection.
+- Assignment integration coverage lives in `apps/backend/tests/test_assignments.py`; it covers admin create/list/filter/status updates, worker accept/decline, ownership, role checks, payment/availability gates, duplicate active assignment rejection, capacity enforcement, payment gate bypass audit, and document expiry warnings. (38 tests as of P2-6)
 - Attendance integration coverage lives in `apps/backend/tests/test_attendance.py`; it covers GPS check-in/out, geofence failures, admin correction, locked payroll correction blocking, ownership, and role checks.
-- Payroll integration coverage lives in `apps/backend/tests/test_payroll.py`; it covers run generation from attendance, deductions, all run statuses, paid transition, locked-run enforcement, and role checks.
+- Payroll integration coverage lives in `apps/backend/tests/test_payroll.py`; it covers run generation from attendance, deductions, all run statuses, paid transition, locked-run enforcement, platform margin calculation, and role checks. (28 tests as of P2-7)
 - GitHub Actions CI lives in `.github/workflows/backend.yml` and `.github/workflows/admin.yml`; backend runs Ruff plus full pytest, admin runs ESLint plus `next build`.
 - Sentry error monitoring is wired for backend/admin. Backend config is `apps/backend/app/core/monitoring.py`; admin App Router instrumentation is `apps/admin/src/instrumentation.ts` and `apps/admin/src/instrumentation-client.ts`. DSNs are env-driven and empty values disable Sentry locally.
 - Production deployment runbook is `docs/DEPLOYMENT.md`; it covers env vars, managed PostgreSQL/Redis/S3, migrations, first admin seed, Docker/systemd deployment, DNS/TLS, smoke tests, rollback, and backups.
@@ -22,6 +22,7 @@
 - Redis production connectivity can be verified with `cd apps/backend && python -m scripts.check_redis`; it redacts credentials and checks ping plus temporary TTL write/read/delete.
 - `apps/mobile-ui-lab/.env` was recreated after a corrupt 330 MB file caused `serve.ps1` to run out of memory. A backup exists as `.env.corrupt-20260508`.
 - Use `MVP_IMPLEMENTATION_TRACKER.md` for current status, blockers, next queue, and Jira-style MVP project tracking.
+- Feature 3 (Worker Replacement) done: `POST /admin/assignments/{id}/replace` in `admin_assignments.py`. New columns `replacement_reason` + `replaced_by_assignment_id` on `Assignment` model; migration `y1z2a3b4c5d6`. Tests in `tests/test_worker_replacement.py` (8 tests). Duplicate-assignment check runs BEFORE availability check (order matters — assigned worker is unavailable by design).
 
 ## Backend Architecture (audited 2026-05-08)
 
@@ -31,7 +32,7 @@
 - Services layer: 16 services in `app/services/`. Repositories in `app/repositories/`. Clean separation.
 - Field-level encryption (Fernet) on sensitive worker fields: UPI, bank account, IFSC.
 - S3 + MinIO for document/selfie file storage.
-- Rate limiting via Redis (`app/core/rate_limit.py`) — gracefully degrades if Redis is unavailable.
+- Rate limiting uses Redis (`app/core/rate_limit.py`). In tests, the rate limit key persists across test methods (Redis not reset between tests). Use `@patch("app.api.<router>.check_rate_limit")` when a test class calls the same rate-limited endpoint more than ~18 times in a session.
 - PostgreSQL 16 on port 5433 (docker-compose). MinIO on ports 9000/9001.
 - Tests: only a single placeholder test exists (`tests/test_auth.py`). No real coverage.
 - API prefix: `/api/v1`. OpenAPI docs only enabled in `APP_ENV=local`.
@@ -117,6 +118,20 @@
 - Entry points: HomeScreen active-job card chip, RequestDetail "View all workers" button.
 - Features: summary strip (assigned/in/absent), per-worker attendance pill, check-in/out times, multi-day streak dots (up to 14 days), "Raise complaint" cross-tab shortcut.
 
+## Hardening Status (HARD-1 complete, 2026-05-29)
+
+- `apps/backend/app/core/config.py` — production validator now rejects weak `JWT_SECRET_KEY` (< 32 chars or placeholder), weak `PAYMENT_WEBHOOK_SECRET`, CORS wildcard `*`, and missing S3 config when `S3_BUCKET` is set.
+- `apps/backend/app/core/security_headers.py` — added `X-XSS-Protection: 1; mode=block`.
+- `apps/backend/app/api/auth.py` — admin login rate limit tightened from 10 to 5 per 5 minutes.
+- `apps/backend/tests/test_auth.py` — `TestAdminLogin` and `TestTokenRefresh` now use `@patch("app.api.auth.check_rate_limit")` class decorator (test login logic, not rate limiting). `TestLogout._login` uses context manager patch. Total real rate-limit increments in the session is 3 (e2e + test_me), within the limit of 5.
+- `apps/admin/.gitignore` — now excludes `.env*` (belt-and-suspenders; root already covers it).
+- `apps/mobile-ui-lab/.gitignore` — now excludes `.env` and `.env.*` (was only `.env*.local`).
+- `apps/mobile-ui-lab/.env.example` — created; covers all required env vars.
+- `apps/backend/.env.example` — fully rewritten with descriptions, format hints, and REQUIRED/OPTIONAL labels for all ~30 vars.
+- `apps/admin/.env.example` — fully rewritten with descriptions.
+- `apps/admin/src/lib/env.ts` — throws at startup if `NEXT_PUBLIC_API_BASE_URL` is missing in production (`NODE_ENV=production` + `APP_ENV != local`).
+- **NOTE**: `apps/mobile-ui-lab/.env` contains a real Google Maps API key (`AIzaSy...`). File is git-ignored (confirmed). Key MUST be restricted in Google Cloud Console to the app bundle IDs.
+
 ## MVP Status (as of 2026-05-08)
 
 **FULL E2E SMOKE TEST PASSED.** All MVP acceptance criteria verified manually on 2026-05-08.
@@ -134,6 +149,24 @@ Confirmed working:
 Remaining gap (not blocking MVP):
 - **No real backend tests** — only a placeholder test. The test suite is effectively empty.
 - **Push notifications (Phase 8)** — push token model exists; FCM integration on mobile not confirmed.
+
+## Flow Bug Fixes — Priority 1 (fixed 2026-05-28)
+
+Four core-flow bugs fixed as part of a structured audit. 111 backend tests pass after fixes.
+
+- **Fix 1 — `canCreateQuote` re-quote gate** (`apps/admin/src/features/requirements/requirement-detail-view.tsx:93`): Changed condition from `!requirement.quote` to `!requirement.quote || ["rejected","expired"].includes(requirement.quote.status)`. Unblocks admin re-quoting after a client rejects the first quote.
+- **Fix 2 — Mobile timeline status mismatch** (`apps/mobile-ui-lab/src/apps/client/screens/RequestDetailScreen.tsx:33`): Changed `"assigned"` to `"workers_assigned"` in the timeline array. Requirement progress indicator was stuck at "Approved" forever after workers were assigned.
+- **Fix 3 — Payment auto-transition bypassed state machine** (`apps/backend/app/api/admin_finance.py:239-255`): Added `validate_requirement_transition()` calls before setting `workers_assigned` or `completed`. Added advance-amount check: payment must be ≥ `quote.advance_amount` before unlocking worker assignment. Import added: `validate_requirement_transition` from `app.core.statuses`. Tests in `tests/test_payment_transitions.py` (7 tests).
+- **Fix 4 — Half-day attendance never set `in_progress`** (`apps/backend/app/api/worker_attendance.py:281-333`): Added same assignment-activation + requirement lifecycle block that `worker_check_in` uses. Jobs where workers only use half-day reporting can now reach `completed`. Tests appended to `tests/test_attendance.py` as `TestHalfDayLifecycleTrigger` (5 tests).
+
+## Flow Bug Fixes — Priority 2 (fixed 2026-05-28)
+
+- **Fix 5 — Check-in bypasses state machine** (`worker_attendance.py:143-146`): Added `validate_requirement_transition()` guard before `build_checkin_attendance`. Removed redundant second `get_requirement_by_id` call inside the lifecycle block. Tests: `TestCheckInStateMachineGuard` in `test_attendance.py` (4 tests).
+- **Fix 6 — Worker decline reverts requirement without state machine** (`worker_assignments.py:117-118`): Wrapped `requirement.status = APPROVED` with `validate_requirement_transition()` + try/except HTTPException. Tests: `TestWorkerDeclineStateMachineGuard` in `test_assignments.py` (2 tests).
+- **Fix 7 — `salary_amount` leaked to client** (`client_requirements.py:210`): Removed `salary_amount` from client-facing assignment projection. Also removed from `ClientRequirementDetail` TypeScript type in `apps/mobile-ui-lab/src/shared/services/client-requirements.service.ts`. Tests: `TestClientRequirementDetailSalaryLeakage` in `test_requirements.py` (1 test).
+- **Fix 8 — Assignment status update had no transition validation** (`admin_assignments.py:309-386`): Added `ASSIGNMENT_TRANSITIONS` dict and `validate_assignment_transition()` to `app/core/assignment_constants.py`. Imported and called in `update_assignment_status()`. Terminal states (completed, cancelled, replaced) cannot be exited. Tests: `TestAssignmentStatusTransitionGuard` in `test_assignments.py` (4 tests).
+- **Fix 9 — Payment amount not validated against advance_amount**: Already done in Priority 1 Fix 3. Covered by `test_payment_transitions.py`.
+- **Fix 10 — Worker phone update had no uniqueness check** (`admin_people.py:755-759`): Added `get_user_by_phone` lookup before setting new phone; raises HTTP 409 if another account already uses it. Phone is `.strip()`-normalised before comparison. Tests: `TestWorkerPhoneUniqueness` in `tests/test_people.py` (4 tests).
 
 ## Admin Clients Page (implemented 2026-05-08)
 

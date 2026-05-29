@@ -45,7 +45,7 @@ export default function CreateClientDialog({
     setError(null);
     try {
       await peopleService.createClient({
-        phone: form.phone.trim(),
+        phone: "+91" + form.phone.trim(),
         client_type: form.client_type,
         company_name: form.client_type === "company" ? form.company_name.trim() : null,
         contact_name: form.contact_name.trim(),
@@ -75,15 +75,21 @@ export default function CreateClientDialog({
         <form id="create-client-form" onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="cc-phone">Phone number *</Label>
-            <Input
-              id="cc-phone"
-              type="tel"
-              placeholder="+91 98765 43210"
-              value={form.phone}
-              onChange={set("phone")}
-              required
-              minLength={5}
-            />
+            <div className="flex">
+              <span className="inline-flex items-center rounded-l-md border border-r-0 border-input bg-muted px-3 text-sm text-muted-foreground">
+                +91
+              </span>
+              <Input
+                id="cc-phone"
+                type="tel"
+                placeholder="98765 43210"
+                value={form.phone}
+                onChange={set("phone")}
+                required
+                minLength={5}
+                className="rounded-l-none"
+              />
+            </div>
           </div>
 
           <div className="space-y-1.5">

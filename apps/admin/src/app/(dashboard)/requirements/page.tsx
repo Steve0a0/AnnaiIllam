@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowRight,
   CalendarDays,
   ClipboardList,
@@ -39,8 +40,6 @@ const REVIEW_STATUSES = new Set(["submitted", "under_review"]);
 const ACTIVE_STATUSES = new Set([
   "approved",
   "workers_assigned",
-  "assigned",
-  "accepted",
   "in_progress",
 ]);
 
@@ -53,22 +52,30 @@ export default function RequirementsPage() {
   const stats = useMemo(() => buildStats(requirements), [requirements]);
 
   const normalizedQuery = query.trim().toLowerCase();
-  const filteredRequirements = requirements.filter((item) => {
-    const matchesStatus = activeStatus === "all" || item.status === activeStatus;
-    const matchesQuery =
-      normalizedQuery.length === 0 ||
-      [
-        `req-${item.id}`,
-        String(item.id),
-        item.category,
-        item.city,
-        item.status.replaceAll("_", " "),
-        item.start_date,
-      ]
-        .filter(Boolean)
-        .some((value) => value.toLowerCase().includes(normalizedQuery));
-    return matchesStatus && matchesQuery;
-  });
+  const filteredRequirements = useMemo(() => {
+    const filtered = requirements.filter((item) => {
+      const matchesStatus = activeStatus === "all" || item.status === activeStatus;
+      const matchesQuery =
+        normalizedQuery.length === 0 ||
+        [
+          `req-${item.id}`,
+          String(item.id),
+          item.category,
+          item.city,
+          item.status.replaceAll("_", " "),
+          item.start_date,
+        ]
+          .filter(Boolean)
+          .some((value) => value.toLowerCase().includes(normalizedQuery));
+      return matchesStatus && matchesQuery;
+    });
+    // Sort SLA-breached submitted requirements to the top
+    return [...filtered].sort((a, b) => {
+      const aBreached = a.sla_breach_notified_at !== null ? 1 : 0;
+      const bBreached = b.sla_breach_notified_at !== null ? 1 : 0;
+      return bBreached - aBreached;
+    });
+  }, [requirements, activeStatus, normalizedQuery]);
 
   return (
     <div className="space-y-6">
@@ -207,15 +214,32 @@ export default function RequirementsPage() {
 
 function RequirementRow({ item }: { item: AdminRequirementListItem }) {
   const action = getRequirementAction(item.status);
+  const isSlaBreach = item.sla_breach_notified_at !== null;
+  const hoursWaiting =
+    item.status === "submitted"
+      ? Math.floor((Date.now() - new Date(item.created_at).getTime()) / 3_600_000)
+      : null;
 
   return (
-    <tr className="transition-colors hover:bg-muted/30">
+    <tr className={["transition-colors hover:bg-muted/30", isSlaBreach ? "bg-red-50/40" : ""].join(" ")}>
       <td className="whitespace-nowrap px-4 py-3">
         <div className="font-mono text-sm font-medium text-foreground">REQ-{item.id}</div>
-        <div className="mt-1 text-xs text-muted-foreground">Client request</div>
+        {hoursWaiting !== null ? (
+          <div className="mt-1 text-xs text-muted-foreground">{hoursWaiting}h waiting</div>
+        ) : (
+          <div className="mt-1 text-xs text-muted-foreground">Client request</div>
+        )}
       </td>
       <td className="px-4 py-3">
-        <StatusBadge value={item.status} />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <StatusBadge value={item.status} />
+          {isSlaBreach && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-red-300 bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700">
+              <AlertTriangle className="h-2.5 w-2.5" />
+              SLA Breach
+            </span>
+          )}
+        </div>
       </td>
       <td className="px-4 py-3">
         <div className="text-sm font-medium text-foreground">{formatLabel(item.category)}</div>
@@ -297,9 +321,7 @@ function getRequirementAction(status: string) {
     case "under_review": return "Create quote";
     case "quoted": return "View quote";
     case "approved": return "Assign workers";
-    case "workers_assigned":
-    case "assigned":
-    case "accepted": return "Track assignment";
+    case "workers_assigned": return "Track assignment";
     case "in_progress": return "View attendance";
     default: return "View";
   }

@@ -172,8 +172,12 @@ class TestUploadUrl:
         }, headers=worker_headers)
         assert r.status_code == 422
 
-    def test_dev_mode_returns_dev_flag(self, client, worker_headers):
-        """S3 is not configured in tests — endpoint should return dev_mode=True."""
+    def test_dev_mode_returns_dev_flag(self, client, worker_headers, monkeypatch):
+        """When S3 is not configured the endpoint must return dev_mode=True."""
+        monkeypatch.setattr(
+            "app.api.worker_onboarding.is_s3_configured",
+            lambda: False,
+        )
         r = client.post(f"{BASE}/worker/onboarding/upload-url", json={
             "document_type": "govt_id",
             "content_type": "image/jpeg",

@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     database_url: str
     redis_url: str
 
+    # SQLAlchemy connection pool (QueuePool, applied for PostgreSQL only).
+    # Increase pool_size in production to match expected concurrent request load.
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+    db_pool_timeout: int = 30        # seconds to wait before raising OperationalError
+    db_pool_recycle: int = 1800      # recycle connections after 30 min to prevent stale sockets
+
     jwt_secret_key: str
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 30
@@ -37,6 +44,12 @@ class Settings(BaseSettings):
     # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     # Store in production via AWS Secrets Manager / Azure Key Vault — NOT only in .env
     field_encryption_key: str = ""
+
+    # Selfie / Liveness validation — set to your storage bucket domain to enforce
+    # that check-in selfies must come from your own bucket, e.g.:
+    #   SELFIE_BUCKET_DOMAIN=your-bucket.s3.ap-south-1.amazonaws.com
+    # Leave empty to disable selfie URL + token validation (local dev / tests).
+    selfie_bucket_domain: str = ""
 
     # AWS S3 — document storage (India region: ap-south-1)
     # For local dev, point this at MinIO: http://localhost:9000
@@ -68,6 +81,10 @@ class Settings(BaseSettings):
     # PAYMENT_WEBHOOK_SECRET must match the secret set in Razorpay Dashboard → Webhooks.
     razorpay_key_id: str = ""
     razorpay_key_secret: str = ""
+
+    # Unclosed check-in alerting — alert admins when a worker has been
+    # checked in for this many hours without checking out. Default 10 hours.
+    max_shift_hours: int = 10
 
     # Sentry error monitoring. Leave SENTRY_DSN empty to disable.
     sentry_dsn: str = ""
@@ -137,8 +154,20 @@ class Settings(BaseSettings):
         if is_prod_like and not self.payment_webhook_secret:
             errors.append("PAYMENT_WEBHOOK_SECRET must be set in staging/production.")
 
+        if is_prod_like and self.payment_webhook_secret in {"change-me", "changeme", "secret", ""}:
+            errors.append(
+                "PAYMENT_WEBHOOK_SECRET is set to an insecure placeholder. "
+                "Use a strong random value in staging/production."
+            )
+
         if is_prod_like and not self.backend_cors_origins:
             errors.append("BACKEND_CORS_ORIGINS must be set in staging/production.")
+
+        if is_prod_like and "*" in self.backend_cors_origins_list:
+            errors.append(
+                "BACKEND_CORS_ORIGINS must not contain '*' in staging/production. "
+                "Use an explicit whitelist of allowed origins."
+            )
 
         if is_prod_like and self.sms_provider == "console":
             errors.append(
@@ -155,6 +184,33 @@ class Settings(BaseSettings):
 
         if is_prod_like and not self.razorpay_key_secret:
             errors.append("RAZORPAY_KEY_SECRET must be set in staging/production.")
+
+        # JWT secret must not be a weak placeholder and must be long enough to be secure.
+        _weak_jwt = {"change-me", "changeme", "secret", "jwt-secret", "test-secret"}
+        if is_prod_like and self.jwt_secret_key.lower() in _weak_jwt:
+            errors.append(
+                "JWT_SECRET_KEY is set to an insecure placeholder. "
+                "Generate a strong secret: python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
+        if is_prod_like and len(self.jwt_secret_key) < 32:
+            errors.append(
+                "JWT_SECRET_KEY must be at least 32 characters in staging/production. "
+                "Generate: python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
+
+        # S3 is required in staging/production for document storage.
+        if is_prod_like and not self.s3_bucket:
+            errors.append(
+                "S3_BUCKET must be set in staging/production. "
+                "Worker ID documents and selfies are stored in S3."
+            )
+        if is_prod_like and self.s3_bucket and not self.aws_access_key_id:
+            errors.append("AWS_ACCESS_KEY_ID must be set when S3_BUCKET is configured.")
+        if is_prod_like and self.s3_bucket and not self.aws_secret_access_key:
+            errors.append("AWS_SECRET_ACCESS_KEY must be set when S3_BUCKET is configured.")
+        if is_prod_like and self.s3_bucket and not self.field_encryption_key:
+            # Already checked above; skip duplicate if already in errors.
+            pass
 
         if errors:
             raise ValueError(

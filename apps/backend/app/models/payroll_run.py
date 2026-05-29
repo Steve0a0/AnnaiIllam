@@ -1,7 +1,7 @@
 ﻿from datetime import date, datetime
 from app.utils.time import utcnow
 
-from sqlalchemy import Date, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -17,6 +17,8 @@ class PayrollRun(Base):
 
     status: Mapped[str] = mapped_column(String(50), default="draft", index=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    require_verified_attendance: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_by_user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"),

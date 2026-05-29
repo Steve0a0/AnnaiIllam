@@ -1,22 +1,25 @@
-﻿from fastapi import APIRouter, Depends, HTTPException
+﻿from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.roles import require_role
+from app.api.dependencies.roles import require_permission_group, require_role
+from app.api.dependencies.scoping import get_accessible_client_ids
 from app.core.payment_constants import ClientPaymentStatus, PaymentModel, WorkerPayoutStatus
 from app.core.payroll_constants import PayrollItemPaymentStatus
 from app.core.roles import UserRole
-from app.core.statuses import RequirementStatus
+from app.core.statuses import RequirementStatus, validate_requirement_transition
 from app.db.deps import get_db
+from app.models.user import User
 from app.models.user import User
 from app.repositories.payment_repository import (
     create_client_payment,
     create_worker_payout,
-    get_all_client_payments,
     get_client_payment_by_id,
     get_client_payments_by_requirement_id,
+    get_client_payments_paginated_stmt,
     get_worker_payout_by_id,
     get_worker_payouts_by_payroll_item_id,
 )
+from app.utils.pagination import PaginationParams, paginate, pagination_meta
 from app.repositories.payroll_repository import (
     get_all_payroll_runs,
     get_deductions_by_payroll_item_id,
@@ -25,6 +28,7 @@ from app.repositories.payroll_repository import (
 )
 from app.repositories.profile_repository import get_worker_profile_by_id
 from app.repositories.requirement_repository import get_requirement_by_id
+from app.models.client_payment import ClientPayment
 from app.schemas.payment import (
     CreateWorkerPayoutSchema,
     MarkRunPaidSchema,
@@ -33,6 +37,7 @@ from app.schemas.payment import (
     UpdateWorkerPayoutStatusSchema,
 )
 from app.services.payment_service import build_manual_client_payment, build_worker_payout
+from app.services.notification_service import enqueue_push_to_user
 from app.utils.audit import audit_event
 from app.utils.response import success_response
 from app.utils.time import utcnow
@@ -43,7 +48,7 @@ router = APIRouter(prefix="/admin/finance", tags=["Admin Finance"])
 @router.post("/client-payments/manual")
 def record_manual_client_payment(
     payload: RecordManualClientPaymentSchema,
-    current_user: User = Depends(require_role(UserRole.ADMIN.value)),
+    current_user: User = Depends(require_permission_group("finance_admin")),
     db: Session = Depends(get_db),
 ):
     requirement = get_requirement_by_id(db, payload.requirement_id)
@@ -99,7 +104,9 @@ def record_manual_client_payment(
 @router.get("/client-payments")
 def list_all_client_payments(
     status: str | None = None,
+    pg: PaginationParams = Depends(),
     current_user: User = Depends(require_role(UserRole.ADMIN.value)),
+    accessible_client_ids: list[int] | None = Depends(get_accessible_client_ids),
     db: Session = Depends(get_db),
 ):
     """List all client payments, optionally filtered by status.
@@ -107,7 +114,16 @@ def list_all_client_payments(
     from app.models.requirement import Requirement
     from app.models.client_profile import ClientProfile
 
-    payments = get_all_client_payments(db, status=status)
+    # Fix 20: paginate the payments list instead of fetching up to 200 at a time
+    stmt = get_client_payments_paginated_stmt(status=status)
+    if accessible_client_ids is not None:
+        if not accessible_client_ids:
+            return success_response(
+                "Client payments fetched successfully",
+                {"items": [], **pagination_meta(pg, 0)},
+            )
+        stmt = stmt.where(ClientPayment.client_id.in_(accessible_client_ids))
+    payments, total = paginate(stmt, db, pg)
 
     # Build lookup maps to avoid N+1
     req_ids = {p.requirement_id for p in payments}
@@ -166,7 +182,7 @@ def list_all_client_payments(
             "created_at": p.created_at.isoformat() if p.created_at else None,
         })
 
-    return success_response("Client payments fetched successfully", data)
+    return success_response("Client payments fetched successfully", {"items": data, **pagination_meta(pg, total)})
 
 
 @router.get("/client-payments/requirement/{requirement_id}")
@@ -203,7 +219,8 @@ def list_admin_client_payments_for_requirement(
 def update_client_payment_status(
     payment_id: int,
     payload: UpdateClientPaymentStatusSchema,
-    current_user: User = Depends(require_role(UserRole.ADMIN.value)),
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(require_permission_group("finance_admin")),
     db: Session = Depends(get_db),
 ):
     """Admin verifies a reference (UTR) payment and marks it paid or failed.
@@ -227,17 +244,54 @@ def update_client_payment_status(
     new_requirement_status = None
 
     # Auto-advance requirement: approved → assigned when advance is confirmed
+    # Also: in_progress → completed when full balance is collected
     if new_status == ClientPaymentStatus.PAID.value:
         requirement = get_requirement_by_id(db, payment.requirement_id)
-        if requirement and requirement.status == RequirementStatus.APPROVED.value:
+        if requirement:
             from app.models.quote import Quote
             from sqlalchemy import select as sa_select
             quote_stmt = sa_select(Quote).where(Quote.requirement_id == requirement.id)
             quote = db.execute(quote_stmt).scalar_one_or_none()
-            if quote and (quote.advance_amount or 0) > 0:
-                requirement.status = RequirementStatus.ASSIGNED.value
-                requirement_transitioned = True
-                new_requirement_status = RequirementStatus.ASSIGNED.value
+
+            if requirement.status == RequirementStatus.APPROVED.value:
+                if quote and (quote.advance_amount or 0) > 0:
+                    # Validate payment covers the advance amount before unlocking assignment
+                    if payment.amount < quote.advance_amount:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=(
+                                f"Payment amount ({payment.amount}) does not cover "
+                                f"the required advance ({quote.advance_amount}). "
+                                "Record the correct amount or split payments to reach the advance threshold."
+                            ),
+                        )
+                    try:
+                        validate_requirement_transition(
+                            requirement.status, RequirementStatus.WORKERS_ASSIGNED.value
+                        )
+                    except ValueError as exc:
+                        raise HTTPException(status_code=400, detail=str(exc)) from exc
+                    requirement.status = RequirementStatus.WORKERS_ASSIGNED.value
+                    requirement_transitioned = True
+                    new_requirement_status = RequirementStatus.WORKERS_ASSIGNED.value
+
+            elif requirement.status == RequirementStatus.IN_PROGRESS.value:
+                if quote and (quote.quoted_amount or 0) > 0:
+                    all_payments = get_client_payments_by_requirement_id(db, requirement.id)
+                    total_paid = sum(
+                        p.amount for p in all_payments
+                        if p.payment_status == ClientPaymentStatus.PAID.value
+                    )
+                    if total_paid >= quote.quoted_amount:
+                        try:
+                            validate_requirement_transition(
+                                requirement.status, RequirementStatus.COMPLETED.value
+                            )
+                        except ValueError as exc:
+                            raise HTTPException(status_code=400, detail=str(exc)) from exc
+                        requirement.status = RequirementStatus.COMPLETED.value
+                        requirement_transitioned = True
+                        new_requirement_status = RequirementStatus.COMPLETED.value
 
     db.commit()
 
@@ -253,6 +307,22 @@ def update_client_payment_status(
         },
     )
 
+    # Notify all admins when a payment is confirmed paid
+    if new_status == ClientPaymentStatus.PAID.value:
+        from sqlalchemy import select as _select
+        _admin_users = db.execute(
+            _select(User).where(User.role == "admin", User.is_active.is_(True))
+        ).scalars().all()
+        for _admin in _admin_users:
+            enqueue_push_to_user(
+                background_tasks,
+                db,
+                user_id=_admin.id,
+                title="Payment received",
+                body=f"Payment confirmed for requirement #{payment.requirement_id}.",
+                data={"type": "payment_received", "requirement_id": str(payment.requirement_id)},
+            )
+
     return success_response(
         "Payment status updated",
         {
@@ -267,7 +337,7 @@ def update_client_payment_status(
 @router.post("/worker-payouts")
 def create_admin_worker_payout(
     payload: CreateWorkerPayoutSchema,
-    current_user: User = Depends(require_role(UserRole.ADMIN.value)),
+    current_user: User = Depends(require_permission_group("finance_admin")),
     db: Session = Depends(get_db),
 ):
     payroll_item = get_payroll_item_by_id(db, payload.payroll_item_id)
@@ -346,7 +416,7 @@ def list_worker_payouts_for_payroll_item(
 def update_worker_payout_status(
     payout_id: int,
     payload: UpdateWorkerPayoutStatusSchema,
-    current_user: User = Depends(require_role(UserRole.ADMIN.value)),
+    current_user: User = Depends(require_permission_group("finance_admin")),
     db: Session = Depends(get_db),
 ):
     payout = get_worker_payout_by_id(db, payout_id)
@@ -442,6 +512,8 @@ def get_payroll_queue(
                 "attendance_days": item.attendance_days,
                 "half_days": item.half_days,
                 "payment_status": item.payment_status,
+                "platform_margin": item.platform_margin,
+                "is_stale": item.is_stale,
                 "deductions": [
                     {
                         "deduction_type": d.deduction_type,
@@ -468,7 +540,7 @@ def get_payroll_queue(
 def mark_payroll_run_paid(
     payroll_run_id: int,
     payload: MarkRunPaidSchema,
-    current_user: User = Depends(require_role(UserRole.ADMIN.value)),
+    current_user: User = Depends(require_permission_group("finance_admin")),
     db: Session = Depends(get_db),
 ):
     """Bulk-transfer: create WorkerPayout records for all pending items in a run,

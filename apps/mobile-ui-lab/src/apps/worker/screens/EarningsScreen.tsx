@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FileDown } from 'lucide-react-native';
+import { FileDown, ChevronRight } from 'lucide-react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { EarningsStackParamList } from '../navigation/types';
 import {
   workerPayrollService,
   type WorkerPayrollItem,
@@ -52,11 +55,13 @@ function statusLabel(status: string): string {
 
 export default function EarningsScreen() {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<NativeStackNavigationProp<EarningsStackParamList>>();
 
   const [items, setItems] = useState<WorkerPayrollItem[]>([]);
   const [payouts, setPayouts] = useState<WorkerPayout[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -81,6 +86,22 @@ export default function EarningsScreen() {
   useEffect(() => { load(); }, [load]);
 
   const onRefresh = () => { setRefreshing(true); load(); };
+
+  const handleDownloadPayslip = async (item: WorkerPayrollItem) => {
+    if (downloadingId) return;
+    setDownloadingId(item.id);
+    try {
+      const text = await workerPayrollService.getPayslipText(item.id);
+      await Share.share({
+        message: text,
+        title: `Payslip – ${fmtPeriod(item.period_start, item.period_end)}`,
+      });
+    } catch {
+      Alert.alert('Could not download payslip', 'Please try again.');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   // Build a map payroll_item_id → payout for quick lookup
   const payoutMap = new Map<number, WorkerPayout>();
@@ -149,6 +170,14 @@ export default function EarningsScreen() {
       >
         <Text style={s.sectionLabel}>Payment history</Text>
 
+        <Pressable
+          style={({ pressed }) => [s.navLink, pressed && { opacity: 0.7 }]}
+          onPress={() => navigation.navigate('Payments')}
+        >
+          <Text style={s.navLinkText}>Salary Disbursements</Text>
+          <ChevronRight size={16} color={C.brand} />
+        </Pressable>
+
         {items.length === 0 ? (
           <View style={s.emptyCard}>
             <Text style={s.emptyTitle}>No payroll records yet</Text>
@@ -209,17 +238,17 @@ export default function EarningsScreen() {
 
                 {/* Download payslip */}
                 <Pressable
-                  style={({ pressed }) => [s.downloadBtn, pressed && { opacity: 0.7 }]}
-                  onPress={() =>
-                    Alert.alert(
-                      'Download payslip',
-                      'Payslip PDF download is not yet available. Please contact admin.',
-                      [{ text: 'OK' }],
-                    )
-                  }
+                  style={({ pressed }) => [s.downloadBtn, (pressed || downloadingId === item.id) && { opacity: 0.6 }]}
+                  disabled={downloadingId !== null}
+                  onPress={() => handleDownloadPayslip(item)}
                 >
-                  <FileDown size={15} color={C.brand} />
-                  <Text style={s.downloadBtnText}>Download payslip</Text>
+                  {downloadingId === item.id
+                    ? <ActivityIndicator size="small" color={C.brand} />
+                    : <FileDown size={15} color={C.brand} />
+                  }
+                  <Text style={s.downloadBtnText}>
+                    {downloadingId === item.id ? 'Loading…' : 'Download payslip'}
+                  </Text>
                 </Pressable>
               </View>
             );
@@ -378,5 +407,20 @@ const s = StyleSheet.create({
   },
   totalLabel: { color: C.brand, fontSize: 14, fontWeight: '600' },
   totalValue: { color: C.brand, fontSize: 18, fontWeight: '800' },
+
+  // Salary Payments nav link
+  navLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: C.surface,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: C.border,
+    marginBottom: 4,
+  },
+  navLinkText: { fontSize: 14, fontWeight: '600', color: C.brand },
 });
 

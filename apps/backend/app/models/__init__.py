@@ -1,12 +1,15 @@
 from app.models.admin_profile import AdminProfile
+from app.models.admin_client_assignment import AdminClientAssignment
 from app.models.audit_log import AuditLog
 from app.models.assignment import Assignment
 from app.models.attendance import Attendance
 from app.models.client_payment import ClientPayment
+from app.models.client_worker_blacklist import ClientWorkerBlacklist
 from app.models.client_profile import ClientProfile
 from app.models.client_rating import ClientRating
 from app.models.complaint import Complaint
 from app.models.complaint_sla_policy import ComplaintSlaPolicy
+from app.models.invoice import Invoice
 from app.models.otp_code import OtpCode
 from app.models.payroll_item import PayrollItem
 from app.models.payroll_run import PayrollRun
@@ -23,7 +26,9 @@ from app.models.worker_interest import WorkerInterest
 from app.models.worker_issue import WorkerIssue
 from app.models.worker_deduction import WorkerDeduction
 from app.models.worker_payout import WorkerPayout
+from app.models.worker_disbursement import WorkerDisbursement
 from app.models.worker_profile import WorkerProfile
+from app.models.dispute import Dispute, DisputeCreditNote
 
 __all__ = [
     "User",
@@ -37,6 +42,7 @@ __all__ = [
     "WorkerInterest",
     "WorkerIssue",
     "AdminProfile",
+    "AdminClientAssignment",
     "AuditLog",
     "Requirement",
     "Quote",
@@ -51,5 +57,10 @@ __all__ = [
     "WorkerPayout",
     "Complaint",
     "ComplaintSlaPolicy",
+    "Invoice",
     "Replacement",
+    "ClientWorkerBlacklist",
+    "WorkerDisbursement",
+    "Dispute",
+    "DisputeCreditNote",
 ]

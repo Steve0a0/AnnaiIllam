@@ -76,8 +76,17 @@ class SubmitReferencePaymentSchema(BaseModel):
 
     requirement_id: int
     amount: int = Field(ge=1)
+    payment_model: str
     payment_mode: str = Field(min_length=2, max_length=50)
     reference_note: str = Field(min_length=3, max_length=500)
+
+    @field_validator("payment_model")
+    @classmethod
+    def validate_payment_model(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {item.value for item in PaymentModel}:
+            raise ValueError("Invalid payment model")
+        return normalized
 
     @field_validator("payment_mode")
     @classmethod

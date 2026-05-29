@@ -276,6 +276,7 @@ def submit_reference_payment(
         client_id=client_profile.id,
         requirement_id=payload.requirement_id,
         amount=payload.amount,
+        payment_model=payload.payment_model,
         payment_mode=payload.payment_mode,
         reference_note=payload.reference_note,
     )

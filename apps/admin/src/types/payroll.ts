@@ -1,7 +1,18 @@
+export type PayrollRunListItem = {
+  id: number;
+  period_start: string;
+  period_end: string;
+  status: string;
+  notes: string | null;
+  require_verified_attendance: boolean;
+  created_at: string;
+};
+
 export type PayrollRunCreatePayload = {
   period_start: string;
   period_end: string;
   notes?: string | null;
+  require_verified_attendance?: boolean;
 };
 
 export type PayrollRunCreateResponse = {
@@ -33,13 +44,20 @@ export type PayrollDeductionCreatePayload = {
   reason?: string | null;
 };
 
+export type PayrollWarning = {
+  code: string;
+  message: string;
+};
+
 export type PayrollDeductionCreateResponse = {
   success: boolean;
   message: string;
   data: {
+    deduction_id: number;
     payroll_item_id: number;
     total_deduction_amount: number;
     net_amount: number;
+    warning: PayrollWarning | null;
   };
 };
 
@@ -61,7 +79,15 @@ export type PayrollItem = {
   half_days: number;
   absent_days: number;
   payment_status: string;
+  platform_margin: number | null;
+  is_stale: boolean;
   deductions: PayrollDeductionItem[];
+};
+
+export type RecalculatePayrollItemResponse = {
+  success: boolean;
+  message: string;
+  data: PayrollItem;
 };
 
 export type PayrollRunDetailResponse = {
@@ -74,6 +100,7 @@ export type PayrollRunDetailResponse = {
       period_end: string;
       status: string;
       notes: string | null;
+      require_verified_attendance: boolean;
     };
     items: PayrollItem[];
   };

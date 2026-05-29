@@ -32,8 +32,10 @@ import {
   workerAttendanceService,
   type WorkerAttendanceRecord,
 } from '../../../shared/services/worker-attendance.service';
+import { workerOnboardingService } from '../../../shared/services/worker-onboarding.service';
 import type { HomeStackParamList } from '../navigation/types';
 import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
 
 type Navigation = NativeStackNavigationProp<HomeStackParamList>;
 type RouteProps = NativeStackScreenProps<HomeStackParamList, 'JobDetail'>['route'];
@@ -166,7 +168,7 @@ export default function JobDetailScreen() {
     const title = action === 'check_in' ? 'Check in now?' : 'Check out now?';
     const message =
       action === 'check_in'
-        ? 'Your current GPS location will be recorded for this check-in.'
+        ? 'Your GPS location and a selfie will be recorded for this check-in.'
         : 'Your current GPS location will be recorded for this check-out.';
 
     Alert.alert(title, message, [
@@ -176,18 +178,71 @@ export default function JobDetailScreen() {
         onPress: async () => {
           setIsBusy(true);
           try {
-            const permission = await Location.requestForegroundPermissionsAsync();
-            if (permission.status !== Location.PermissionStatus.GRANTED) {
+            // 1. Location permission + position (both actions)
+            const locPerm = await Location.requestForegroundPermissionsAsync();
+            if (locPerm.status !== Location.PermissionStatus.GRANTED) {
               throw new Error('Location permission is required for attendance.');
             }
             const pos = await Location.getCurrentPositionAsync({
               accuracy: Location.Accuracy.Balanced,
             });
-            const payload = {
+
+            const payload: {
+              assignment_id: number;
+              latitude: number;
+              longitude: number;
+              selfie_url?: string;
+              selfie_token?: string;
+            } = {
               assignment_id: assignment.assignment_id,
               latitude: pos.coords.latitude,
               longitude: pos.coords.longitude,
             };
+
+            // 2. Selfie capture + upload (check-in only)
+            if (action === 'check_in') {
+              const camPerm = await ImagePicker.requestCameraPermissionsAsync();
+              if (camPerm.status !== 'granted') {
+                throw new Error(
+                  'Camera permission is required to take a selfie for check-in. Please enable it in your device settings.',
+                );
+              }
+
+              // Get a one-time selfie token before opening the camera
+              const selfieToken = await workerAttendanceService.getSelfieToken();
+
+              const photo = await ImagePicker.launchCameraAsync({
+                mediaTypes: ['images'],
+                allowsEditing: true,
+                aspect: [1, 1],
+                quality: 0.8,
+              });
+              if (photo.canceled) {
+                setIsBusy(false);
+                return;
+              }
+
+              const asset = photo.assets[0];
+              const uploadInfo = await workerOnboardingService.getUploadUrl(
+                'selfie',
+                asset.mimeType ?? 'image/jpeg',
+              );
+
+              if (uploadInfo.upload_url) {
+                await workerOnboardingService.uploadToStorage(
+                  uploadInfo.upload_url,
+                  asset.uri,
+                  asset.mimeType ?? 'image/jpeg',
+                );
+                payload.selfie_url = uploadInfo.s3_key ?? asset.uri;
+              } else {
+                // Dev / local: no storage configured — pass local URI
+                payload.selfie_url = asset.uri;
+              }
+
+              payload.selfie_token = selfieToken;
+            }
+
             if (action === 'check_in') {
               await workerAttendanceService.checkIn(payload);
             } else {
@@ -210,11 +265,21 @@ export default function JobDetailScreen() {
   const req = assignment?.requirement;
   const tone = assignment ? statusTone[assignment.status] : null;
   const today = toDateKey(new Date());
-  const isToday = req ? toDateKey(parseApiDate(req.start_date)) === today : false;
+
+  // Use assignment-specific window if set, otherwise fall back to full requirement range
+  const rangeStart = assignment?.start_date ?? req?.start_date ?? null;
+  const rangeEnd = assignment?.end_date ?? (
+    req ? toDateKey(addDays(parseApiDate(req.start_date), req.duration_days - 1)) : null
+  );
+  const isWithinRange =
+    rangeStart != null &&
+    today >= rangeStart &&
+    (rangeEnd == null || today <= rangeEnd);
+
   const hasCheckedIn = Boolean(attendance?.check_in_time);
   const hasCheckedOut = Boolean(attendance?.check_out_time);
-  const canCheckIn = isToday && assignment?.status === 'accepted' && !hasCheckedIn;
-  const canCheckOut = isToday && (assignment?.status === 'active' || hasCheckedIn) && !hasCheckedOut;
+  const canCheckIn = isWithinRange && ['assigned', 'accepted'].includes(assignment?.status ?? '') && !hasCheckedIn;
+  const canCheckOut = isWithinRange && (assignment?.status === 'active' || hasCheckedIn) && !hasCheckedOut;
 
   return (
     <View flex={1} backgroundColor={C.page} paddingTop={insets.top}>
@@ -308,7 +373,7 @@ export default function JobDetailScreen() {
               shadowOffset={{ width: 0, height: 10 }}
             >
               <Text fontSize={11} fontWeight="500" color="rgba(255,255,255,0.42)" letterSpacing={1}>
-                {isToday ? "TODAY'S SHIFT" : formatDate(req.start_date).toUpperCase()}
+                {today === rangeStart ? "TODAY'S SHIFT" : rangeStart ? formatDate(rangeStart).toUpperCase() : formatDate(req.start_date).toUpperCase()}
               </Text>
 
               <Text marginTop={10} fontSize={22} fontWeight="500" color="#FFFFFF" lineHeight={28}>
@@ -331,8 +396,10 @@ export default function JobDetailScreen() {
                   {assignment.assigned_role ?? req.subcategory ?? 'Worker'}
                 </DarkRow>
                 <DarkRow icon={<CalendarDays size={15} color="rgba(255,255,255,0.6)" />}>
-                  {formatDate(req.start_date)}
-                  {req.duration_days > 1 ? ` · ${req.duration_days} days` : ''}
+                  {assignment.start_date
+                    ? `${formatDate(assignment.start_date)}${assignment.end_date ? ` → ${formatDate(assignment.end_date)}` : ''}`
+                    : `${formatDate(req.start_date)}${req.duration_days > 1 ? ` · ${req.duration_days} days` : ''}`
+                  }
                 </DarkRow>
               </YStack>
 
@@ -561,9 +628,9 @@ export default function JobDetailScreen() {
                 <Divider />
                 <InfoRow label="City" value={`${req.city}, ${req.state}`} />
                 <Divider />
-                <InfoRow label="Start date" value={formatDate(req.start_date)} mono />
+                <InfoRow label="Job start date" value={formatDate(req.start_date)} mono />
                 <Divider />
-                <InfoRow label="Duration" value={`${req.duration_days} ${req.duration_days === 1 ? 'day' : 'days'}`} />
+                <InfoRow label="Job duration" value={`${req.duration_days} ${req.duration_days === 1 ? 'day' : 'days'}`} />
                 <Divider />
                 <InfoRow label="Category" value={req.category} />
                 {req.subcategory ? (
@@ -583,6 +650,18 @@ export default function JobDetailScreen() {
                 <InfoRow label="Your role" value={assignment.assigned_role ?? 'Not specified'} />
                 <Divider />
                 <InfoRow label="Shift" value={assignment.assigned_shift ?? 'Not specified'} mono />
+                {assignment.start_date ? (
+                  <>
+                    <Divider />
+                    <InfoRow
+                      label="Your dates"
+                      value={assignment.end_date
+                        ? `${formatDate(assignment.start_date)} – ${formatDate(assignment.end_date)}`
+                        : `From ${formatDate(assignment.start_date)}`}
+                      mono
+                    />
+                  </>
+                ) : null}
                 {assignment.salary_amount ? (
                   <>
                     <Divider />
@@ -730,4 +809,10 @@ function toDateKey(date: Date) {
 function parseApiDate(value: string) {
   const [year, month, day] = value.split('-').map(Number);
   return new Date(year, month - 1, day);
+}
+
+function addDays(date: Date, days: number) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
 }

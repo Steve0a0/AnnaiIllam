@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import type { ComponentProps } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import type { GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
@@ -146,7 +146,10 @@ export default function CreateRequestScreen() {
   };
 
   return (
-    <View style={[clientStyles.root, { paddingTop: insets.top }]}>
+    <KeyboardAvoidingView
+      style={[clientStyles.root, { paddingTop: insets.top }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
       <ScrollView contentContainerStyle={clientStyles.content} keyboardShouldPersistTaps="handled">
         <ScreenHeader title="Request workers" subtitle={`Step ${step + 1} of 4`} onBack={() => navigation.goBack()} />
 
@@ -190,7 +193,7 @@ export default function CreateRequestScreen() {
           </Pressable>
         </View>
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -236,6 +239,8 @@ function StepJob({ form, update }: StepProps) {
                 update('work_location', '');
                 update('site_latitude', null);
                 update('site_longitude', null);
+              } else {
+                update('work_location', v);
               }
             },
           }}

@@ -2,13 +2,14 @@
 
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Check, Search, X } from "lucide-react";
+import { Check, RefreshCw, Search, X } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { assignmentsService } from "@/services/assignments.service";
 import { getErrorMessage } from "@/lib/get-error-message";
 import type { WorkerMatch } from "@/types/assignment";
 import type { AdminRequirementDetail } from "@/types/requirement";
+import type { ReplacementHint } from "@/features/assignments/requirement-assignments-list";
 
 const roleFallbacks = [
   "General Worker",
@@ -34,10 +35,12 @@ const shiftFallbacks = [
 export default function CreateAssignmentForm({
   requirement,
   requirementId,
+  replacementHint,
   onSuccess,
 }: {
   requirement: AdminRequirementDetail;
   requirementId: number;
+  replacementHint?: ReplacementHint;
   onSuccess: () => void;
 }) {
   const [selectedWorkerIds, setSelectedWorkerIds] = useState<string[]>([]);
@@ -48,14 +51,40 @@ export default function CreateAssignmentForm({
   );
   const shiftOptions = buildOptions([requirement.shift_details], shiftFallbacks);
   const salaryOptions = buildSalaryOptions(requirement.quote?.rate_per_worker);
-  const [assignedRole, setAssignedRole] = useState(roleOptions[0] || "");
+
+  const defaultStartDate = replacementHint?.startDate ?? requirement.start_date ?? "";
+  const defaultEndDate = replacementHint?.endDate ?? (() => {
+    if (!requirement.start_date || !requirement.duration_days) return "";
+    const d = new Date(requirement.start_date);
+    d.setDate(d.getDate() + requirement.duration_days - 1);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  // Requirement date window for constraining datepicker inputs
+  const reqMinDate = requirement.start_date ?? undefined;
+  const reqMaxDate = (() => {
+    if (!requirement.start_date || !requirement.duration_days) return undefined;
+    const d = new Date(requirement.start_date);
+    d.setDate(d.getDate() + requirement.duration_days - 1);
+    return d.toISOString().slice(0, 10);
+  })();
+  const defaultRole = replacementHint?.assignedRole ?? roleOptions[0] ?? "";
+  const defaultShift = replacementHint?.assignedShift ?? shiftOptions[0] ?? "";
+  const defaultSalary = replacementHint?.salaryAmount
+    ? String(replacementHint.salaryAmount)
+    : "";
+
+  const [assignedRole, setAssignedRole] = useState(defaultRole);
   const [customRole, setCustomRole] = useState("");
-  const [assignedShift, setAssignedShift] = useState(shiftOptions[0] || "");
+  const [assignedShift, setAssignedShift] = useState(defaultShift);
   const [customShift, setCustomShift] = useState("");
-  const [salaryMode, setSalaryMode] = useState(salaryOptions[0]?.value || "");
-  const [salaryAmount, setSalaryAmount] = useState("");
+  const [salaryMode, setSalaryMode] = useState(
+    replacementHint?.salaryAmount ? "custom" : salaryOptions[0]?.value || "",
+  );
+  const [salaryAmount, setSalaryAmount] = useState(defaultSalary);
   const [notes, setNotes] = useState("");
-  const [skipPaymentCheck, setSkipPaymentCheck] = useState(false);
+  const [startDate, setStartDate] = useState(defaultStartDate);
+  const [endDate, setEndDate] = useState(defaultEndDate);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const queryClient = useQueryClient();
@@ -121,29 +150,35 @@ export default function CreateAssignmentForm({
     setLoading(true);
 
     try {
-      await Promise.all(
+      const responses = await Promise.all(
         selectedWorkerIds.map((workerId) =>
-          assignmentsService.createAssignment(
-            {
-              requirement_id: requirementId,
-              worker_profile_id: Number(workerId),
-              assigned_role: finalRole || null,
-              assigned_shift: finalShift || null,
-              salary_amount: finalSalary ? Number(finalSalary) : null,
-              notes: notes || null,
-            },
-            skipPaymentCheck,
-          ),
+          assignmentsService.createAssignment({
+            requirement_id: requirementId,
+            worker_profile_id: Number(workerId),
+            assigned_role: finalRole || null,
+            assigned_shift: finalShift || null,
+            salary_amount: finalSalary ? Number(finalSalary) : null,
+            notes: notes || null,
+            start_date: startDate || null,
+            end_date: endDate || null,
+          }),
         ),
       );
 
       const assignedCount = selectedWorkerIds.length;
+      const warnings = responses
+        .map((r) => r.data?.warning)
+        .filter((w): w is NonNullable<typeof w> => w !== null && w !== undefined);
       resetForm();
-      setMessage(
+      const baseMsg =
         assignedCount === 1
           ? "Worker assigned successfully."
-          : `${assignedCount} workers assigned successfully.`,
-      );
+          : `${assignedCount} workers assigned successfully.`;
+      const warningMsg =
+        warnings.length > 0
+          ? ` Warning: ${warnings[0].message}`
+          : "";
+      setMessage(baseMsg + warningMsg);
 
       try {
         await queryClient.invalidateQueries({
@@ -175,7 +210,13 @@ export default function CreateAssignmentForm({
     setSalaryMode(salaryOptions[0]?.value || "");
     setSalaryAmount("");
     setNotes("");
-    setSkipPaymentCheck(false);
+    setStartDate(requirement.start_date ?? "");
+    setEndDate(() => {
+      if (!requirement.start_date || !requirement.duration_days) return "";
+      const d = new Date(requirement.start_date);
+      d.setDate(d.getDate() + requirement.duration_days - 1);
+      return d.toISOString().slice(0, 10);
+    });
   }
 
   function toggleWorker(workerProfileId: number) {
@@ -195,6 +236,14 @@ export default function CreateAssignmentForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
+      {replacementHint && (
+        <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <RefreshCw className="size-4 shrink-0 text-amber-600" />
+          <p className="text-sm text-amber-800">
+            <span className="font-semibold">Replacement mode</span> — dates and role pre-filled from the declined slot. Select a new worker below.
+          </p>
+        </div>
+      )}
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.8fr)]">
         <section className="space-y-4">
           <div className="rounded-xl border border-border bg-[#FAFAF9] p-4">
@@ -394,7 +443,7 @@ export default function CreateAssignmentForm({
                 ) : null}
               </Field>
 
-              <Field label="Worker payout, optional">
+              <Field label="Worker daily rate (used for payroll)">
                 <select
                   className="h-11 w-full rounded-lg border border-input bg-white px-3 text-sm"
                   value={salaryMode}
@@ -412,14 +461,14 @@ export default function CreateAssignmentForm({
                     type="number"
                     min="0"
                     step="1"
-                    className="mt-2 h-11 w-full rounded-lg border border-input bg-white px-3 text-sm"
+                    className="h-11 w-full rounded-lg border border-input bg-white px-3 text-sm mt-2"
                     value={salaryAmount}
                     onChange={(e) => setSalaryAmount(e.target.value)}
-                    placeholder="Enter payout amount"
+                    placeholder="Daily rate in rupees"
                   />
                 ) : null}
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Leave unset for MVP if payout is handled offline.
+                  Per day — payroll calculates gross as daily rate × days worked.
                 </p>
               </Field>
 
@@ -431,24 +480,39 @@ export default function CreateAssignmentForm({
                   placeholder="Add assignment notes"
                 />
               </Field>
-            </div>
 
-            <label className="mt-5 flex cursor-pointer items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
-              <input
-                type="checkbox"
-                checked={skipPaymentCheck}
-                onChange={(e) => setSkipPaymentCheck(e.target.checked)}
-                className="mt-0.5 shrink-0 accent-amber-600"
-              />
-              <div>
-                <p className="text-xs font-semibold text-amber-800">
-                  Override payment gate (admin override)
-                </p>
-                <p className="mt-0.5 text-xs text-amber-700">
-                  Bypasses the confirmed-advance requirement. Use only for demos or manual flows where payment is handled offline.
-                </p>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Worker starts">
+                  <input
+                    type="date"
+                    className="h-11 w-full rounded-lg border border-input bg-white px-3 text-sm"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    min={reqMinDate}
+                    max={reqMaxDate}
+                  />
+                </Field>
+                <Field label="Worker ends">
+                  <input
+                    type="date"
+                    className="h-11 w-full rounded-lg border border-input bg-white px-3 text-sm"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    min={startDate || reqMinDate}
+                    max={reqMaxDate}
+                  />
+                </Field>
               </div>
-            </label>
+              {reqMinDate && reqMaxDate ? (
+                <p className="text-xs text-muted-foreground">
+                  Job window: {reqMinDate} → {reqMaxDate}. Dates outside this range will be rejected.
+                </p>
+              ) : (
+              <p className="text-xs text-muted-foreground">
+                Set the specific days this worker covers. Check-in is blocked outside this window.
+              </p>
+              )}
+            </div>
 
             {message ? (
               <div className="mt-4 rounded-lg bg-[#FAFAF9] px-3 py-2 text-sm text-foreground">
@@ -583,12 +647,22 @@ function WorkerCard({
               {badge}
             </span>
           ) : null}
+          {worker.expired_documents?.length > 0 ? (
+            <span className="rounded-full bg-[#FEF3C7] px-2 py-0.5 text-xs font-semibold text-[#B45309]">
+              Doc expired
+            </span>
+          ) : null}
         </div>
       </div>
       <p className="mt-2 text-xs text-muted-foreground">
-        {worker.reasons.filter((reason) => reason !== "interested").join(", ") ||
+        {worker.reasons.filter((reason) => reason !== "interested" && reason !== "document_expired").join(", ") ||
           "Available"}
       </p>
+      {worker.expired_documents?.length > 0 ? (
+        <p className="mt-1 text-xs text-[#B45309]">
+          Expired: {worker.expired_documents.map((d) => `${d.document_type} (${d.expiry_date})`).join(", ")}
+        </p>
+      ) : null}
     </button>
   );
 }
@@ -715,31 +789,27 @@ function buildSalaryOptions(ratePerWorker?: number | null) {
   if (ratePerWorker && ratePerWorker > 0) {
     presets.push(
       {
-        label: `70% of client rate - Rs. ${Math.round(
-          ratePerWorker * 0.7,
-        ).toLocaleString("en-IN")}`,
+        label: `70% of client rate — Rs. ${Math.round(ratePerWorker * 0.7).toLocaleString("en-IN")} / day`,
         value: String(Math.round(ratePerWorker * 0.7)),
       },
       {
-        label: `80% of client rate - Rs. ${Math.round(
-          ratePerWorker * 0.8,
-        ).toLocaleString("en-IN")}`,
+        label: `80% of client rate — Rs. ${Math.round(ratePerWorker * 0.8).toLocaleString("en-IN")} / day`,
         value: String(Math.round(ratePerWorker * 0.8)),
       },
       {
-        label: `90% of client rate - Rs. ${Math.round(
-          ratePerWorker * 0.9,
-        ).toLocaleString("en-IN")}`,
+        label: `90% of client rate — Rs. ${Math.round(ratePerWorker * 0.9).toLocaleString("en-IN")} / day`,
         value: String(Math.round(ratePerWorker * 0.9)),
       },
     );
   }
 
   presets.push(
-    { label: "Rs. 500", value: "500" },
-    { label: "Rs. 700", value: "700" },
-    { label: "Rs. 900", value: "900" },
-    { label: "Rs. 1,200", value: "1200" },
+    { label: "Rs. 300 / day", value: "300" },
+    { label: "Rs. 400 / day", value: "400" },
+    { label: "Rs. 500 / day", value: "500" },
+    { label: "Rs. 600 / day", value: "600" },
+    { label: "Rs. 700 / day", value: "700" },
+    { label: "Rs. 800 / day", value: "800" },
   );
 
   return presets;

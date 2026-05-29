@@ -745,10 +745,10 @@ class TestClientPaymentStatusUpdate:
         assert response.status_code == 200
         data = response.json()["data"]
         assert data["requirement_auto_transitioned"] is True
-        assert data["new_requirement_status"] == RequirementStatus.ASSIGNED.value
+        assert data["new_requirement_status"] == RequirementStatus.WORKERS_ASSIGNED.value
 
         db.refresh(req)
-        assert req.status == RequirementStatus.ASSIGNED.value
+        assert req.status == RequirementStatus.WORKERS_ASSIGNED.value
 
     def test_paid_no_auto_transition_when_no_advance_quote(
         self, client, db, admin_headers, approved_requirement, client_profile
@@ -944,8 +944,9 @@ class TestFinanceListEndpoints:
         )
         assert response.status_code == 200
         data = response.json()["data"]
-        assert isinstance(data, list)
-        ids = [p["id"] for p in data]
+        # Fix 20: response is now paginated — use data["items"]
+        assert "items" in data
+        ids = [p["id"] for p in data["items"]]
         assert pending_gateway_payment.id in ids
 
     def test_admin_filters_client_payments_by_status(
@@ -957,7 +958,7 @@ class TestFinanceListEndpoints:
         )
         assert response.status_code == 200
         data = response.json()["data"]
-        assert all(p["payment_status"] == "pending" for p in data)
+        assert all(p["payment_status"] == "pending" for p in data["items"])
 
     def test_admin_lists_payments_for_requirement(
         self, client, admin_headers, pending_gateway_payment, approved_requirement
@@ -992,3 +993,176 @@ class TestFinanceListEndpoints:
         data = response.json()["data"]
         assert len(data) >= 1
         assert data[0]["payout_mode"] == "bank_transfer"
+
+
+# ──────────────────────────────────────────────────────────────────
+# Reference Payment Submission (client out-of-app transfer)
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestReferencePaymentSubmission:
+    def _payload(self, requirement_id: int, **overrides) -> dict:
+        base = {
+            "requirement_id": requirement_id,
+            "amount": 10000,
+            "payment_model": PaymentModel.CLIENT_PAYS_COMPANY.value,
+            "payment_mode": "upi",
+            "reference_note": "UPI/2026/05/123456",
+        }
+        base.update(overrides)
+        return base
+
+    def test_reference_payment_stores_provided_payment_model(
+        self, client, db, client_headers, client_profile, approved_requirement
+    ):
+        """payment_model from the request must be stored verbatim — no hardcoding."""
+        response = client.post(
+            f"{BASE}/client/payments/submit-reference",
+            json=self._payload(
+                approved_requirement.id,
+                payment_model=PaymentModel.CLIENT_PAYS_COMPANY.value,
+            ),
+            headers=client_headers,
+        )
+        assert response.status_code == 200
+        payment_id = response.json()["data"]["payment_id"]
+
+        from app.models.client_payment import ClientPayment as CP
+        payment = db.get(CP, payment_id)
+        assert payment is not None
+        assert payment.payment_model == PaymentModel.CLIENT_PAYS_COMPANY.value
+
+    def test_reference_payment_with_mixed_model_stores_mixed(
+        self, client, db, client_headers, client_profile, approved_requirement
+    ):
+        """Any valid PaymentModel value must be stored, not overwritten by a hardcoded default."""
+        response = client.post(
+            f"{BASE}/client/payments/submit-reference",
+            json=self._payload(
+                approved_requirement.id,
+                payment_model=PaymentModel.MIXED.value,
+            ),
+            headers=client_headers,
+        )
+        assert response.status_code == 200
+        payment_id = response.json()["data"]["payment_id"]
+
+        from app.models.client_payment import ClientPayment as CP
+        payment = db.get(CP, payment_id)
+        assert payment.payment_model == PaymentModel.MIXED.value
+
+    def test_reference_payment_invalid_payment_model_returns_422(
+        self, client, client_headers, client_profile, approved_requirement
+    ):
+        response = client.post(
+            f"{BASE}/client/payments/submit-reference",
+            json=self._payload(approved_requirement.id, payment_model="advance"),
+            headers=client_headers,
+        )
+        assert response.status_code == 422
+
+    def test_reference_payment_missing_payment_model_returns_422(
+        self, client, client_headers, client_profile, approved_requirement
+    ):
+        payload = self._payload(approved_requirement.id)
+        del payload["payment_model"]
+        response = client.post(
+            f"{BASE}/client/payments/submit-reference",
+            json=payload,
+            headers=client_headers,
+        )
+        assert response.status_code == 422
+
+    def test_reference_payment_appears_in_list_with_correct_model(
+        self, client, client_headers, client_profile, approved_requirement
+    ):
+        """payment_model is returned in the client's payment list endpoint."""
+        client.post(
+            f"{BASE}/client/payments/submit-reference",
+            json=self._payload(
+                approved_requirement.id,
+                payment_model=PaymentModel.CLIENT_PAYS_COMPANY.value,
+            ),
+            headers=client_headers,
+        )
+        list_resp = client.get(
+            f"{BASE}/client/payments/requirement/{approved_requirement.id}",
+            headers=client_headers,
+        )
+        assert list_resp.status_code == 200
+        payments = list_resp.json()["data"]
+        assert len(payments) >= 1
+        assert payments[0]["payment_model"] == PaymentModel.CLIENT_PAYS_COMPANY.value
+
+
+class TestClientPaymentsListPagination:
+    """Fix 20: admin client-payments list must return pagination metadata."""
+
+    def test_list_returns_items_and_pagination_meta(
+        self, client, db, admin_headers, client_user
+    ):
+        """GET /admin/finance/client-payments must return items+pagination when no payments exist."""
+        response = client.get(
+            f"{BASE}/admin/finance/client-payments",
+            headers=admin_headers,
+        )
+
+        assert response.status_code == 200
+        body = response.json()["data"]
+        assert "items" in body, "Response must contain 'items'"
+        assert "total" in body, "Response must contain 'total'"
+        assert "page" in body, "Response must contain 'page'"
+        assert "total_pages" in body, "Response must contain 'total_pages'"
+
+    def test_page_size_param_is_honoured(
+        self, client, db, admin_headers, client_user
+    ):
+        """page_size=1 must return at most 1 item per page."""
+        cp = ClientProfile(
+            user_id=client_user.id,
+            client_type="individual",
+            contact_name="Payer",
+            city="Chennai",
+            state="Tamil Nadu",
+            address="Mylapore",
+        )
+        db.add(cp)
+        db.flush()
+
+        req = Requirement(
+            client_id=cp.id,
+            category="Housekeeping",
+            number_of_workers=1,
+            work_location="Site",
+            city="Chennai",
+            state="Tamil Nadu",
+            start_date=date.today(),
+            duration_days=1,
+            status="approved",
+            created_by_user_id=client_user.id,
+        )
+        db.add(req)
+        db.flush()
+
+        for _ in range(3):
+            payment = ClientPayment(
+                client_id=cp.id,
+                requirement_id=req.id,
+                amount=5000,
+                payment_model=PaymentModel.CLIENT_PAYS_COMPANY.value,
+                payment_mode="upi",
+                payment_status=ClientPaymentStatus.PAID.value,
+            )
+            db.add(payment)
+        db.commit()
+
+        response = client.get(
+            f"{BASE}/admin/finance/client-payments",
+            params={"page_size": 1},
+            headers=admin_headers,
+        )
+
+        assert response.status_code == 200
+        body = response.json()["data"]
+        assert len(body["items"]) == 1
+        assert body["total"] >= 3

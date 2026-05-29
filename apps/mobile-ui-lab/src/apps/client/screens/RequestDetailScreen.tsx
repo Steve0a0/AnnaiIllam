@@ -30,7 +30,7 @@ function resolvePayCard(
 type Navigation = NativeStackNavigationProp<HomeStackParamList>;
 type Route = RouteProp<HomeStackParamList, 'RequestDetail'>;
 
-const timeline = ['submitted', 'under_review', 'quoted', 'approved', 'assigned', 'in_progress', 'completed'];
+const timeline = ['submitted', 'under_review', 'quoted', 'approved', 'workers_assigned', 'in_progress', 'completed'];
 
 export default function RequestDetailScreen() {
   const navigation = useNavigation<Navigation>();
@@ -41,6 +41,9 @@ export default function RequestDetailScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [quoteAction, setQuoteAction] = useState<'approve' | 'reject' | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+
+  const todayStr = new Date().toISOString().split('T')[0];
 
   const load = useCallback(async () => {
     const [d, pmts] = await Promise.all([
@@ -69,6 +72,43 @@ export default function RequestDetailScreen() {
     } finally {
       setIsRefreshing(false);
     }
+  };
+
+  const cancelRequest = () => {
+    if (!detail || cancelling) return;
+    Alert.alert(
+      'Cancel this request?',
+      'Please provide a reason (min 10 characters). This cannot be undone.',
+      [
+        { text: 'Go back', style: 'cancel' },
+        {
+          text: 'Cancel request',
+          style: 'destructive',
+          onPress: () => {
+            Alert.prompt(
+              'Cancellation reason',
+              'Briefly describe why you are cancelling.',
+              async (reason) => {
+                if (!reason || reason.trim().length < 10) {
+                  Alert.alert('Too short', 'Please provide at least 10 characters.');
+                  return;
+                }
+                setCancelling(true);
+                try {
+                  await clientRequirementsService.cancel(detail.id, reason.trim());
+                  await load();
+                } catch {
+                  Alert.alert('Could not cancel', 'Please try again.');
+                } finally {
+                  setCancelling(false);
+                }
+              },
+              'plain-text',
+            );
+          },
+        },
+      ],
+    );
   };
 
   const decideQuote = async (action: 'approve' | 'reject') => {
@@ -162,22 +202,30 @@ export default function RequestDetailScreen() {
                 </View>
                 {detail.quote.terms_notes ? <Text style={styles.notes}>{detail.quote.terms_notes}</Text> : null}
                 {detail.quote.status === 'sent' ? (
-                  <View style={styles.quoteActions}>
-                    <Pressable
-                      style={[styles.quoteButton, styles.rejectButton, quoteAction !== null && styles.disabledButton]}
-                      onPress={() => decideQuote('reject')}
-                      disabled={quoteAction !== null}
-                    >
-                      {quoteAction === 'reject' ? <ActivityIndicator size="small" color={C.ink} /> : <Text style={styles.rejectText}>Reject quote</Text>}
-                    </Pressable>
-                    <Pressable
-                      style={[styles.quoteButton, styles.approveButton, quoteAction !== null && styles.disabledButton]}
-                      onPress={() => decideQuote('approve')}
-                      disabled={quoteAction !== null}
-                    >
-                      {quoteAction === 'approve' ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.approveText}>Approve quote</Text>}
-                    </Pressable>
-                  </View>
+                  detail.quote.valid_until && detail.quote.valid_until < todayStr ? (
+                    <View style={styles.expiredBanner}>
+                      <Text style={styles.expiredText}>
+                        This quote expired on {formatDate(detail.quote.valid_until)}. Admin will send a revised quote shortly.
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.quoteActions}>
+                      <Pressable
+                        style={[styles.quoteButton, styles.rejectButton, quoteAction !== null && styles.disabledButton]}
+                        onPress={() => decideQuote('reject')}
+                        disabled={quoteAction !== null}
+                      >
+                        {quoteAction === 'reject' ? <ActivityIndicator size="small" color={C.ink} /> : <Text style={styles.rejectText}>Reject quote</Text>}
+                      </Pressable>
+                      <Pressable
+                        style={[styles.quoteButton, styles.approveButton, quoteAction !== null && styles.disabledButton]}
+                        onPress={() => decideQuote('approve')}
+                        disabled={quoteAction !== null}
+                      >
+                        {quoteAction === 'approve' ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.approveText}>Approve quote</Text>}
+                      </Pressable>
+                    </View>
+                  )
                 ) : null}
               </View>
             ) : (
@@ -275,8 +323,8 @@ export default function RequestDetailScreen() {
                 ? (detail.quote.advance_amount ?? 0)
                 : Math.max(0, detail.quote.quoted_amount - totalPaid);
 
-              // Full payment complete — requirement is marked completed automatically
-              if (!isAdvance && payments.some((p) => p.payment_status === 'paid')) {
+              // Full payment complete — all collected amounts cover the quoted total
+              if (!isAdvance && totalPaid >= detail.quote.quoted_amount) {
                 return (
                   <View style={[clientStyles.card, styles.advancePendingCard, { borderColor: C.successText }]}>
                     <View style={styles.advancePendingRow}>
@@ -286,7 +334,7 @@ export default function RequestDetailScreen() {
                       </Text>
                     </View>
                     <Text style={clientStyles.subtitle}>
-                      ₹{formatAmount(displayAmount)} received. This request has been marked as completed.
+                      ₹{formatAmount(detail.quote.quoted_amount)} received. This request has been marked as completed.
                     </Text>
                   </View>
                 );
@@ -352,6 +400,27 @@ export default function RequestDetailScreen() {
               );
             })()}
 
+            {/* ── Cancel request (submitted or quoted only) ── */}
+            {(detail.status === 'submitted' || detail.status === 'quoted') && (
+              <View style={clientStyles.card}>
+                <Text style={clientStyles.sectionLabel}>Cancel this request</Text>
+                <Text style={[styles.body, { marginTop: 4 }]}>
+                  You can cancel this request while it is still under review or quoted.
+                  Once workers are assigned, cancellation must go through admin.
+                </Text>
+                <Pressable
+                  style={({ pressed }) => [styles.cancelBtn, pressed && { opacity: 0.75 }, cancelling && styles.disabledButton]}
+                  onPress={cancelRequest}
+                  disabled={cancelling}
+                >
+                  {cancelling
+                    ? <ActivityIndicator size="small" color={C.ink} />
+                    : <Text style={styles.cancelBtnText}>Cancel request</Text>
+                  }
+                </Pressable>
+              </View>
+            )}
+
             {/* ── Rate this job (completed only) ── */}
             {detail.status === 'completed' && (
               <View style={clientStyles.card}>
@@ -364,6 +433,22 @@ export default function RequestDetailScreen() {
                   onPress={() => navigation.navigate('RateRequirement', { requirementId: detail.id, category: detail.category })}
                 >
                   <Text style={styles.rateBtnText}>Leave a rating →</Text>
+                </Pressable>
+              </View>
+            )}
+
+            {/* ── Raise a dispute (completed only) ── */}
+            {detail.status === 'completed' && (
+              <View style={clientStyles.card}>
+                <Text style={clientStyles.sectionLabel}>Dispute</Text>
+                <Text style={[styles.body, { marginTop: 4 }]}>
+                  Have an issue with attendance, quality, or billing? Raise a formal dispute for review.
+                </Text>
+                <Pressable
+                  style={({ pressed }) => [styles.disputeBtn, pressed && { opacity: 0.85 }]}
+                  onPress={() => navigation.navigate('RaiseDispute', { requirementId: detail.id })}
+                >
+                  <Text style={styles.disputeBtnText}>Raise a dispute →</Text>
                 </Pressable>
               </View>
             )}
@@ -630,6 +715,47 @@ const styles = StyleSheet.create({
   },
   rateBtnText: {
     color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600' as const,
+  },
+  disputeBtn: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: C.dangerText,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center' as const,
+  },
+  disputeBtnText: {
+    color: C.dangerText,
+    fontSize: 15,
+    fontWeight: '600' as const,
+  },
+  expiredBanner: {
+    marginTop: 14,
+    borderRadius: 10,
+    padding: 14,
+    backgroundColor: C.surfaceAlt,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  expiredText: {
+    color: C.muted,
+    fontSize: 14,
+    lineHeight: 20,
+    fontStyle: 'italic',
+  },
+  cancelBtn: {
+    marginTop: 14,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center' as const,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.surfaceAlt,
+  },
+  cancelBtnText: {
+    color: C.ink,
     fontSize: 15,
     fontWeight: '600' as const,
   },

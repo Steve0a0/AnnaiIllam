@@ -85,6 +85,14 @@ def sum_client_payments_paid(db: Session) -> int:
     return db.execute(stmt).scalar_one()
 
 
+def get_client_payments_paginated_stmt(status: str | None = None):
+    """Return a select statement for client payments — use with paginate()."""
+    stmt = select(ClientPayment).order_by(ClientPayment.created_at.desc())
+    if status:
+        stmt = stmt.where(ClientPayment.payment_status == status)
+    return stmt
+
+
 def get_all_client_payments(
     db: Session,
     status: str | None = None,

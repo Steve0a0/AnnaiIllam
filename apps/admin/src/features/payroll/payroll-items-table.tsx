@@ -1,10 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import StatusBadge from "@/components/shared/status-badge";
 import AddDeductionForm from "@/features/payroll/add-deduction-form";
 import CreateWorkerPayoutForm from "@/features/finance/create-worker-payout-form";
 import WorkerPayoutsList from "@/features/finance/worker-payouts-list";
 import { formatCurrency } from "@/lib/format-currency";
+import { payrollService } from "@/services/payroll.service";
+import { getErrorMessage } from "@/lib/get-error-message";
 import type { PayrollItem } from "@/types/payroll";
 
 export default function PayrollItemsTable({
@@ -43,6 +46,11 @@ export default function PayrollItemsTable({
             </div>
 
             <StatusBadge value={item.payment_status} />
+            {item.is_stale && (
+              <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                Stale — needs recalculation
+              </span>
+            )}
           </div>
 
           <div className="mt-4 grid gap-4 md:grid-cols-3 xl:grid-cols-6">
@@ -56,6 +64,17 @@ export default function PayrollItemsTable({
             <Detail label="Half Days" value={item.half_days} />
             <Detail label="Absent Days" value={item.absent_days} />
           </div>
+
+          {item.platform_margin !== null && (
+            <div className={`mt-3 rounded-lg px-3 py-2 text-sm ${item.platform_margin < 0 ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"}`}>
+              Platform margin: {item.platform_margin < 0 ? "−" : "+"}{formatCurrency(Math.abs(item.platform_margin))}
+              {item.platform_margin < 0 && " — Worker salary exceeds client rate. Negative margin."}
+            </div>
+          )}
+
+          {item.is_stale && item.payment_status !== "paid" && !payrollLocked && (
+            <StaleRecalculateBar itemId={item.id} onSuccess={onRefresh} />
+          )}
 
           <div className="mt-5">
             <h4 className="text-sm font-semibold text-slate-800">Deductions</h4>
@@ -129,6 +148,47 @@ function Detail({
         {label}
       </p>
       <p className="mt-1 text-sm font-medium text-slate-800">{value}</p>
+    </div>
+  );
+}
+
+function StaleRecalculateBar({
+  itemId,
+  onSuccess,
+}: {
+  itemId: number;
+  onSuccess: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleRecalculate() {
+    setLoading(true);
+    setError("");
+    try {
+      await payrollService.recalculatePayrollItem(itemId);
+      onSuccess();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+      <p className="flex-1 text-sm text-amber-800">
+        Payroll needs recalculation due to attendance correction.
+      </p>
+      <button
+        type="button"
+        disabled={loading}
+        onClick={handleRecalculate}
+        className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+      >
+        {loading ? "Recalculating…" : "Recalculate"}
+      </button>
+      {error ? <p className="w-full text-xs text-red-600">{error}</p> : null}
     </div>
   );
 }

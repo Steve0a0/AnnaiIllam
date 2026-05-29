@@ -102,7 +102,7 @@ export default function AvailabilityScreen() {
   const selectedShifts = csvToSet(profile?.available_shifts);
   const recordsByDate = new Map(records.map((record) => [record.availability_date, record]));
 
-  const patchProfile = async (patch: { is_available?: boolean; available_days?: string | null; available_shifts?: string | null }) => {
+  const patchProfile = async (patch: { is_available?: boolean; available_days?: string[] | null; available_shifts?: string[] | null }) => {
     if (!profile) return;
     setIsSavingProfile(true);
     try {
@@ -119,14 +119,16 @@ export default function AvailabilityScreen() {
     const next = new Set(selectedDays);
     if (next.has(day)) next.delete(day);
     else next.add(day);
-    await patchProfile({ available_days: Array.from(next).join(',') || null });
+    const arr = Array.from(next);
+    await patchProfile({ available_days: arr.length ? arr : null });
   };
 
   const toggleShiftPreference = async (shift: string) => {
     const next = new Set(selectedShifts);
     if (next.has(shift)) next.delete(shift);
     else next.add(shift);
-    await patchProfile({ available_shifts: Array.from(next).join(',') || null });
+    const arr = Array.from(next);
+    await patchProfile({ available_shifts: arr.length ? arr : null });
   };
 
   const setDateStatus = async (dateKey: string, status: WorkerAvailabilityStatus) => {
@@ -425,8 +427,10 @@ function StatusChip({
   );
 }
 
-function csvToSet(value?: string | null) {
-  return new Set((value || '').split(',').map((item) => item.trim()).filter(Boolean));
+function csvToSet(value?: string | string[] | null) {
+  if (!value) return new Set<string>();
+  if (Array.isArray(value)) return new Set(value.filter(Boolean));
+  return new Set(value.split(',').map((item) => item.trim()).filter(Boolean));
 }
 
 function getSevenDays(startDate: Date) {

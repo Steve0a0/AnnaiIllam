@@ -8,6 +8,8 @@ import {
   AlertTriangle,
   ArrowUpRight,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   FileText,
   Search,
@@ -65,14 +67,72 @@ export default function WorkersPage() {
   const queryClient = useQueryClient();
   const [csv, setCsv] = useState(sampleCsv);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "profile_submitted" | "approved" | "rejected">("profile_submitted");
+  const [verificationStatus, setVerificationStatus] = useState("pending");
+  const [availabilityFilter, setAvailabilityFilter] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [page, setPage] = useState(1);
   const [selectedWorker, setSelectedWorker] = useState<AdminWorker | null>(null);
   const [rejectWorker, setRejectWorker] = useState<AdminWorker | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [openingDocumentId, setOpeningDocumentId] = useState<number | null>(null);
 
-  const workersQuery = useQuery({ queryKey: ["admin-workers"], queryFn: peopleService.getWorkers });
+  const PAGE_SIZE = 20;
+
+  const queryParams = {
+    verification_status: verificationStatus || undefined,
+    is_available: availabilityFilter === "available" ? true : availabilityFilter === "unavailable" ? false : undefined,
+    category: categoryFilter || undefined,
+    page,
+    page_size: PAGE_SIZE,
+  };
+
+  const workersQuery = useQuery({
+    queryKey: ["admin-workers", queryParams],
+    queryFn: () => peopleService.getWorkers(queryParams),
+  });
   const parsedWorkers = useMemo(() => parseCsv(csv), [csv]);
+
+  const pageData = workersQuery.data?.data;
+  const workers = pageData?.items ?? [];
+  const totalPages = pageData?.total_pages ?? 1;
+  const total = pageData?.total ?? 0;
+
+  const pendingReviewCount = workers.filter((w) => w.onboarding_step === "profile_submitted").length;
+  const approvedCount = workers.filter((w) => w.onboarding_step === "approved").length;
+  const rejectedCount = workers.filter((w) => w.verification_status === "rejected").length;
+
+  // Client-side search on the current page only
+  const filteredWorkers = workers.filter((worker) => {
+    const query = search.trim().toLowerCase();
+    return (
+      query.length === 0 ||
+      [worker.full_name, worker.phone, worker.city, worker.state, worker.skills]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query))
+    );
+  });
+
+  const activeWorker = selectedWorker ?? filteredWorkers[0] ?? null;
+
+  function resetFilters() {
+    setPage(1);
+    setSelectedWorker(null);
+  }
+
+  function handleVerificationStatusChange(value: string) {
+    setVerificationStatus(value);
+    resetFilters();
+  }
+
+  function handleAvailabilityChange(value: string) {
+    setAvailabilityFilter(value);
+    resetFilters();
+  }
+
+  function handleCategoryChange(value: string) {
+    setCategoryFilter(value);
+    resetFilters();
+  }
 
   const importMutation = useMutation({
     mutationFn: () => peopleService.importWorkers(parsedWorkers),
@@ -103,30 +163,6 @@ export default function WorkersPage() {
       queryClient.invalidateQueries({ queryKey: ["admin-workers"] });
     },
   });
-
-  const workers = workersQuery.data?.data?.items ?? [];
-  const pendingReviewCount = workers.filter((w) => w.onboarding_step === "profile_submitted").length;
-  const approvedCount = workers.filter((w) => w.onboarding_step === "approved").length;
-  const rejectedCount = workers.filter((w) => w.verification_status === "rejected").length;
-
-  const filteredWorkers = workers.filter((worker) => {
-    const query = search.trim().toLowerCase();
-    const matchesSearch =
-      query.length === 0 ||
-      [worker.full_name, worker.phone, worker.city, worker.state, worker.skills]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(query));
-
-    const matchesStatus =
-      statusFilter === "all" ||
-      (statusFilter === "profile_submitted" && worker.onboarding_step === "profile_submitted") ||
-      (statusFilter === "approved" && worker.onboarding_step === "approved") ||
-      (statusFilter === "rejected" && worker.verification_status === "rejected");
-
-    return matchesSearch && matchesStatus;
-  });
-
-  const activeWorker = selectedWorker ?? filteredWorkers[0] ?? null;
 
   function handleApprove(worker: AdminWorker) {
     approveMutation.mutate(worker.user_id);
@@ -197,36 +233,75 @@ export default function WorkersPage() {
         <Card className="overflow-hidden border-border bg-white shadow-sm">
           <CardHeader className="border-b border-border">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <CardTitle className="font-display text-xl font-semibold">Submitted profiles</CardTitle>
+              <CardTitle className="font-display text-xl font-semibold">
+                Workers
+                {total > 0 && (
+                  <span className="ml-2 text-sm font-normal text-muted-foreground">({total})</span>
+                )}
+              </CardTitle>
               <div className="relative w-full lg:w-72">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search workers"
+                  placeholder="Search on this page"
                   className="pl-9"
                 />
               </div>
             </div>
+
+            {/* Verification status filter */}
             <div className="flex flex-wrap gap-2 pt-2">
               {(
                 [
-                  ["profile_submitted", "Pending"],
+                  ["pending", "Pending review"],
                   ["approved", "Approved"],
                   ["rejected", "Rejected"],
-                  ["all", "All"],
+                  ["", "All"],
                 ] as const
               ).map(([value, label]) => (
                 <Button
                   key={value}
                   type="button"
-                  variant={statusFilter === value ? "default" : "outline"}
+                  variant={verificationStatus === value ? "default" : "outline"}
                   size="sm"
-                  onClick={() => setStatusFilter(value)}
+                  onClick={() => handleVerificationStatusChange(value)}
                 >
                   {label}
                 </Button>
               ))}
+            </div>
+
+            {/* Availability + category filters */}
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <div className="flex gap-1.5">
+                {(
+                  [
+                    ["", "Any availability"],
+                    ["available", "Available"],
+                    ["unavailable", "Unavailable"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    variant={availabilityFilter === value ? "secondary" : "ghost"}
+                    size="sm"
+                    onClick={() => handleAvailabilityChange(value)}
+                    className="h-7 text-xs"
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+              <div className="relative">
+                <Input
+                  value={categoryFilter}
+                  onChange={(e) => handleCategoryChange(e.target.value)}
+                  placeholder="Filter by category"
+                  className="h-7 w-40 text-xs"
+                />
+              </div>
             </div>
           </CardHeader>
 
@@ -245,10 +320,10 @@ export default function WorkersPage() {
           ) : filteredWorkers.length === 0 ? (
             <div className="p-6">
               <EmptyState
-                title={search || statusFilter !== "all" ? "No workers match your filters" : "No workers yet"}
+                title={search || verificationStatus || availabilityFilter || categoryFilter ? "No workers match your filters" : "No workers yet"}
                 description={
-                  search || statusFilter !== "all"
-                    ? "Try a different search term or switch the filter tab."
+                  search || verificationStatus || availabilityFilter || categoryFilter
+                    ? "Try a different search term or adjust the filters."
                     : "Worker profiles will appear here once workers complete onboarding."
                 }
               />
@@ -259,7 +334,7 @@ export default function WorkersPage() {
                 <table className="min-w-full">
                   <thead className="bg-muted/40">
                     <tr>
-                      {["Worker", "Skills", "Location", "Submitted", "Status"].map((heading) => (
+                      {["Worker", "Category", "Location", "Availability", "Status", ""].map((heading) => (
                         <th
                           key={heading}
                           className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground"
@@ -280,17 +355,38 @@ export default function WorkersPage() {
                           <p className="text-sm font-medium text-foreground">{worker.full_name}</p>
                           <p className="mt-1 font-mono text-xs text-muted-foreground">{worker.phone ?? "No phone"}</p>
                         </td>
-                        <td className="max-w-[220px] px-4 py-4 text-sm text-muted-foreground">
-                          {formatList(worker.skills)}
+                        <td className="px-4 py-4 text-sm text-muted-foreground">
+                          {worker.category}
+                          {worker.subcategory ? (
+                            <span className="block text-xs text-muted-foreground/70">{worker.subcategory}</span>
+                          ) : null}
                         </td>
                         <td className="px-4 py-4 text-sm text-muted-foreground">
                           {worker.city}, {worker.state}
                         </td>
-                        <td className="px-4 py-4 font-mono text-xs text-muted-foreground">
-                          {formatDate(worker.submitted_at)}
+                        <td className="px-4 py-4">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                              worker.is_available
+                                ? "bg-green-50 text-green-700"
+                                : "bg-amber-50 text-amber-700"
+                            }`}
+                          >
+                            {worker.is_available ? "Available" : "On leave"}
+                          </span>
                         </td>
                         <td className="px-4 py-4">
                           <StatusBadge value={worker.verification_status} />
+                        </td>
+                        <td className="px-4 py-4">
+                          <Link
+                            href={`/workers/${worker.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                          >
+                            View
+                            <ArrowUpRight className="h-3 w-3" />
+                          </Link>
                         </td>
                       </tr>
                     ))}
@@ -298,11 +394,40 @@ export default function WorkersPage() {
                 </table>
               </div>
               <div className="border-t border-border px-4 py-3">
-                <p className="text-xs text-muted-foreground">
-                  {filteredWorkers.length === workers.length
-                    ? `${workers.length} worker${workers.length !== 1 ? "s" : ""}`
-                    : `Showing ${filteredWorkers.length} of ${workers.length} workers`}
-                </p>
+                <div className="flex items-center justify-between gap-4">
+                  <p className="text-xs text-muted-foreground">
+                    {filteredWorkers.length < workers.length
+                      ? `${filteredWorkers.length} match on page ${page} of ${totalPages} (${total} total)`
+                      : `Page ${page} of ${totalPages} — ${total} worker${total !== 1 ? "s" : ""} total`}
+                  </p>
+                  {totalPages > 1 && (
+                    <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={page <= 1}
+                        onClick={() => { setPage((p) => p - 1); setSelectedWorker(null); }}
+                        className="h-7 w-7 p-0"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="min-w-[4rem] text-center text-xs text-muted-foreground">
+                        {page} / {totalPages}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={page >= totalPages}
+                        onClick={() => { setPage((p) => p + 1); setSelectedWorker(null); }}
+                        className="h-7 w-7 p-0"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </div>
             </>
           )}
@@ -652,13 +777,13 @@ function ReviewField({ label, value, wide = false }: { label: string; value: str
   );
 }
 
-function formatList(value: string | null) {
+function formatList(value: string | string[] | null) {
   if (!value) return "Not provided";
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .join(", ");
+  const items = Array.isArray(value)
+    ? value
+    : value.split(",").map((item) => item.trim());
+  const filtered = items.filter(Boolean);
+  return filtered.length ? filtered.join(", ") : "Not provided";
 }
 
 function formatDate(value: string | null) {

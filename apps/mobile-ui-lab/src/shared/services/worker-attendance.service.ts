@@ -1,6 +1,7 @@
 import { http } from '../lib/http';
 
 type Envelope<T> = { success: boolean; message: string; data: T };
+type PaginatedEnvelope<T> = Envelope<{ items: T[]; total: number; page: number; limit: number; pages: number }>;
 
 export type WorkerAttendanceStatus =
   | 'present'
@@ -33,13 +34,21 @@ export type AttendanceActionPayload = {
   longitude?: number | null;
   notes?: string | null;
   selfie_url?: string | null;
+  selfie_token?: string | null;
   qr_code?: string | null;
 };
 
 export const workerAttendanceService = {
   list: async () => {
-    const res = await http.get<Envelope<WorkerAttendanceRecord[]>>('/worker/attendance');
-    return res.data.data;
+    const res = await http.get<PaginatedEnvelope<WorkerAttendanceRecord>>('/worker/attendance');
+    return res.data.data.items;
+  },
+
+  getSelfieToken: async (): Promise<string> => {
+    const res = await http.post<Envelope<{ selfie_token: string; expires_in_seconds: number }>>(
+      '/worker/attendance/selfie-token',
+    );
+    return res.data.data.selfie_token;
   },
 
   checkIn: async (payload: AttendanceActionPayload) => {

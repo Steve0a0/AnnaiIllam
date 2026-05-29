@@ -1,6 +1,6 @@
 """Integration tests for all auth API endpoints via FastAPI TestClient."""
 from datetime import timedelta
-
+from unittest.mock import patch
 
 from app.core.security import hash_password
 from app.models.otp_code import OtpCode
@@ -214,8 +214,9 @@ class TestRoleMismatch:
 # Admin login
 # ---------------------------------------------------------------------------
 
+@patch("app.api.auth.check_rate_limit")  # test login logic, not rate limiting
 class TestAdminLogin:
-    def test_valid_credentials_return_tokens(self, client, admin_user):
+    def test_valid_credentials_return_tokens(self, _rl, client, admin_user):
         res = client.post(
             f"{BASE}/auth/admin/login",
             json={"email": admin_user.email, "password": "AdminPass123!"},
@@ -226,7 +227,7 @@ class TestAdminLogin:
         assert "refresh_token" in data
         assert data["user"]["role"] == "admin"
 
-    def test_wrong_password_rejected(self, client, admin_user):
+    def test_wrong_password_rejected(self, _rl, client, admin_user):
         res = client.post(
             f"{BASE}/auth/admin/login",
             json={"email": admin_user.email, "password": "WrongPass999!"},
@@ -234,14 +235,14 @@ class TestAdminLogin:
         assert res.status_code == 401
         assert "Invalid credentials" in res.json()["message"]
 
-    def test_unknown_email_rejected(self, client):
+    def test_unknown_email_rejected(self, _rl, client):
         res = client.post(
             f"{BASE}/auth/admin/login",
             json={"email": "nobody@annai-illam.test", "password": "AdminPass123!"},
         )
         assert res.status_code == 401
 
-    def test_non_admin_user_rejected(self, client, db, client_user):
+    def test_non_admin_user_rejected(self, _rl, client, db, client_user):
         """A client-role user cannot log in via the admin endpoint."""
         client_user.password_hash = hash_password("AdminPass123!")
         db.commit()
@@ -251,7 +252,7 @@ class TestAdminLogin:
         )
         assert res.status_code == 401
 
-    def test_inactive_admin_rejected(self, client, db, admin_user):
+    def test_inactive_admin_rejected(self, _rl, client, db, admin_user):
         admin_user.is_active = False
         db.commit()
         res = client.post(
@@ -261,7 +262,7 @@ class TestAdminLogin:
         assert res.status_code == 403
         assert "disabled" in res.json()["message"].lower()
 
-    def test_admin_without_password_hash_rejected(self, client, db):
+    def test_admin_without_password_hash_rejected(self, _rl, client, db):
         user = User(phone="9000000099", email="nopw@annai-illam.test", role="admin", is_active=True, password_hash=None)
         db.add(user)
         db.commit()
@@ -271,14 +272,14 @@ class TestAdminLogin:
         )
         assert res.status_code == 401
 
-    def test_short_password_schema_rejected(self, client):
+    def test_short_password_schema_rejected(self, _rl, client):
         res = client.post(
             f"{BASE}/auth/admin/login",
             json={"email": "any@annai-illam.test", "password": "short"},
         )
         assert res.status_code == 422
 
-    def test_invalid_email_schema_rejected(self, client):
+    def test_invalid_email_schema_rejected(self, _rl, client):
         res = client.post(
             f"{BASE}/auth/admin/login",
             json={"email": "not-an-email", "password": "AdminPass123!"},
@@ -290,6 +291,7 @@ class TestAdminLogin:
 # Token refresh
 # ---------------------------------------------------------------------------
 
+@patch("app.api.auth.check_rate_limit")  # test refresh logic, not rate limiting
 class TestTokenRefresh:
     def _login(self, client, admin_user):
         res = client.post(
@@ -298,7 +300,7 @@ class TestTokenRefresh:
         )
         return res.json()["data"]
 
-    def test_valid_refresh_returns_new_tokens(self, client, admin_user):
+    def test_valid_refresh_returns_new_tokens(self, _rl, client, admin_user):
         tokens = self._login(client, admin_user)
         res = client.post(
             f"{BASE}/auth/refresh",
@@ -311,14 +313,14 @@ class TestTokenRefresh:
         # Token rotation — new refresh token must differ
         assert new_data["refresh_token"] != tokens["refresh_token"]
 
-    def test_garbage_token_rejected(self, client):
+    def test_garbage_token_rejected(self, _rl, client):
         res = client.post(
             f"{BASE}/auth/refresh",
             json={"refresh_token": "not.a.real.token"},
         )
         assert res.status_code == 401
 
-    def test_revoked_token_rejected(self, client, admin_user):
+    def test_revoked_token_rejected(self, _rl, client, admin_user):
         tokens = self._login(client, admin_user)
         refresh = tokens["refresh_token"]
         # First refresh rotates and revokes the original token
@@ -327,21 +329,22 @@ class TestTokenRefresh:
         res = client.post(f"{BASE}/auth/refresh", json={"refresh_token": refresh})
         assert res.status_code == 401
 
-    def test_missing_token_field_rejected(self, client):
+    def test_missing_token_field_rejected(self, _rl, client):
         res = client.post(f"{BASE}/auth/refresh", json={})
         assert res.status_code == 422
 
 
 # ---------------------------------------------------------------------------
 # Logout
-# ---------------------------------------------------------------------------
 
 class TestLogout:
     def _login(self, client, admin_user):
-        res = client.post(
-            f"{BASE}/auth/admin/login",
-            json={"email": admin_user.email, "password": "AdminPass123!"},
-        )
+        # Bypass rate limit — this class is testing logout, not login rate limiting.
+        with patch("app.api.auth.check_rate_limit"):
+            res = client.post(
+                f"{BASE}/auth/admin/login",
+                json={"email": admin_user.email, "password": "AdminPass123!"},
+            )
         return res.json()["data"]
 
     def test_logout_success(self, client, admin_user):

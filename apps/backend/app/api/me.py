@@ -60,13 +60,13 @@ def change_password(
     db: Session = Depends(get_db),
 ):
     """Change the current user's password. Requires the existing password for verification."""
-    if not current_user.hashed_password:
+    if not current_user.password_hash:
         raise HTTPException(status_code=400, detail="Password login is not enabled for this account")
 
-    if not verify_password(payload.current_password, current_user.hashed_password):
+    if not verify_password(payload.current_password, current_user.password_hash):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
-    current_user.hashed_password = hash_password(payload.new_password)
+    current_user.password_hash = hash_password(payload.new_password)
     db.commit()
 
     audit_event("password_changed", {"user_id": current_user.id})

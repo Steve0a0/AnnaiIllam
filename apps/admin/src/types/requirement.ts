@@ -5,6 +5,9 @@ export type AdminRequirementListItem = {
   city: string;
   status: string;
   start_date: string;
+  created_at: string;
+  sla_hours: number;
+  sla_breach_notified_at: string | null;
 };
 
 export type AdminRequirementListData = {
@@ -37,7 +40,13 @@ export type AdminRequirementDetail = {
   accommodation_required: boolean;
   budget_amount: number | null;
   notes: string | null;
+  site_latitude: number | null;
+  site_longitude: number | null;
+  geofence_radius_meters: number | null;
+  require_geofence: boolean;
   status: string;
+  rejection_reason: string | null;
+  cancellation_reason: string | null;
   quote: null | {
     id: number;
     quoted_amount: number;
@@ -58,6 +67,26 @@ export type AdminRequirementDetailResponse = {
   data: AdminRequirementDetail;
 };
 
+export type RejectRequirementResponse = {
+  success: boolean;
+  message: string;
+  data: {
+    id: number;
+    status: string;
+    rejection_reason: string;
+  };
+};
+
+export type CancelRequirementResponse = {
+  success: boolean;
+  message: string;
+  data: {
+    id: number;
+    status: string;
+    cancellation_reason: string;
+  };
+};
+
 export type CreateQuotePayload = {
   requirement_id: number;
   quoted_amount: number;
@@ -71,6 +100,15 @@ export type CreateQuotePayload = {
 };
 
 export type MarkReviewResponse = {
+  success: boolean;
+  message: string;
+  data: {
+    id: number;
+    status: string;
+  };
+};
+
+export type MarkCompleteResponse = {
   success: boolean;
   message: string;
   data: {
@@ -108,4 +146,40 @@ export type RequirementInterestsResponse = {
   success: boolean;
   message: string;
   data: RequirementInterestItem[];
+};
+
+export type WorkerPayoutData = {
+  id: number;
+  amount: number;
+  payout_mode: string;
+  payout_status: string;
+  transaction_reference: string | null;
+  notes: string | null;
+  paid_at: string | null;
+};
+
+export type WorkerPaymentItem = {
+  assignment_id: number;
+  worker_profile_id: number;
+  worker_name: string;
+  salary_amount: number | null;
+  attendance_days: number;
+  half_days: number;
+  absent_days: number;
+  suggested_amount: number;
+  payout: WorkerPayoutData | null;
+};
+
+export type WorkerPaymentsResponse = {
+  success: boolean;
+  message: string;
+  data: WorkerPaymentItem[];
+};
+
+export type WorkerPaymentRecordPayload = {
+  assignment_id: number;
+  amount: number;
+  payout_mode: string;
+  transaction_reference?: string | null;
+  notes?: string | null;
 };

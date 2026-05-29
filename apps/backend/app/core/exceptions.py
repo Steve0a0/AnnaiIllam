@@ -34,9 +34,18 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def generic_exception_handler(request: Request, exc: Exception):
-        logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+        request_id = getattr(request.state, "request_id", None)
+        logger.exception(
+            "Unhandled exception on %s %s | request_id=%s",
+            request.method,
+            request.url.path,
+            request_id,
+        )
         capture_exception(exc)
+        content = error_response("Internal server error")
+        if request_id:
+            content["request_id"] = request_id
         return JSONResponse(
             status_code=500,
-            content=error_response("Internal server error"),
+            content=content,
         )

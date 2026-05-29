@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Modal, RefreshControl } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, Modal, RefreshControl } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { pushTokenService } from '../../../shared/services/push-token.service';
 import * as Location from 'expo-location';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -31,6 +32,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../../shared/store/auth.store';
 import { authStorage } from '../../../shared/lib/auth-storage';
+import { useNetworkStatus } from '../../../shared/hooks/use-network-status';
 import {
   workerAssignmentsService,
   type WorkerAssignment,
@@ -43,6 +45,15 @@ import {
 import { workerProfileService } from '../../../shared/services/worker-profile.service';
 
 type Props = Record<string, never>;
+
+const CACHE_KEY = 'worker_home_cache_v1';
+
+interface HomeCache {
+  assignments: WorkerAssignment[];
+  attendance: WorkerAttendanceRecord[];
+  isAvailable: boolean | null;
+  cachedAt: number;
+}
 
 const C = {
   page: '#F5F5F4',
@@ -91,10 +102,12 @@ export default function WorkerHomeScreen(_props: Props) {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const clearAuth = useAuthStore((s) => s.clearAuth);
+  const networkStatus = useNetworkStatus();
   const [assignments, setAssignments] = useState<WorkerAssignment[]>([]);
   const [attendance, setAttendance] = useState<WorkerAttendanceRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isStale, setIsStale] = useState(false);
   const [actionId, setActionId] = useState<number | null>(null);
   const [isAvailable, setIsAvailable] = useState<boolean | null>(null);
   const [visibleWeekDate, setVisibleWeekDate] = useState(() => new Date());
@@ -105,6 +118,33 @@ export default function WorkerHomeScreen(_props: Props) {
     longitude: number;
   } | null>(null);
   const [isConfirmingCheckIn, setIsConfirmingCheckIn] = useState(false);
+
+  /** Restore cached data so the screen isn't blank while loading. */
+  const loadCache = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(CACHE_KEY);
+      if (!raw) return;
+      const cached: HomeCache = JSON.parse(raw);
+      setAssignments(cached.assignments);
+      setAttendance(cached.attendance);
+      setIsAvailable(cached.isAvailable);
+      setIsStale(true);
+    } catch {
+      // Corrupt cache — ignore
+    }
+  }, []);
+
+  const saveCache = useCallback(
+    async (a: WorkerAssignment[], att: WorkerAttendanceRecord[], avail: boolean | null) => {
+      try {
+        const payload: HomeCache = { assignments: a, attendance: att, isAvailable: avail, cachedAt: Date.now() };
+        await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+      } catch {
+        // Non-fatal
+      }
+    },
+    [],
+  );
 
   const load = useCallback(async () => {
     const [profileResult, assignmentsResult, attendanceResult] = await Promise.allSettled([
@@ -121,30 +161,52 @@ export default function WorkerHomeScreen(_props: Props) {
     if (attendanceResult.status === 'fulfilled') {
       setAttendance(attendanceResult.value);
     }
-  }, []);
+    if (
+      assignmentsResult.status === 'fulfilled' &&
+      attendanceResult.status === 'fulfilled'
+    ) {
+      setIsStale(false);
+      await saveCache(
+        assignmentsResult.value,
+        attendanceResult.value,
+        profileResult.status === 'fulfilled' ? profileResult.value.is_available : null,
+      );
+    }
+  }, [saveCache]);
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
       setIsLoading(true);
-      load()
-        .catch(() => {
-          if (active) {
-            Alert.alert('Could not load jobs', 'Pull down to refresh and try again.');
-          }
-        })
-        .finally(() => active && setIsLoading(false));
+
+      // Show cached data immediately while the network request is in-flight.
+      loadCache().finally(() => {
+        if (!active) return;
+        load()
+          .catch(() => {
+            if (active) {
+              // If we have cached data, don't show an intrusive alert — the
+              // stale banner is sufficient.
+              if (assignments.length === 0) {
+                Alert.alert('Could not load jobs', 'Pull down to refresh and try again.');
+              }
+            }
+          })
+          .finally(() => active && setIsLoading(false));
+      });
 
       return () => {
         active = false;
       };
-    }, [load]),
+    }, [load, loadCache, assignments.length]),
   );
 
   const refresh = async () => {
     setIsRefreshing(true);
     try {
       await load();
+    } catch {
+      Alert.alert('Could not refresh', 'Check your connection and try again.');
     } finally {
       setIsRefreshing(false);
     }
@@ -193,7 +255,19 @@ export default function WorkerHomeScreen(_props: Props) {
           longitude: position.coords.longitude,
         });
       } catch (error) {
-        Alert.alert('Location error', error instanceof Error ? error.message : 'Could not get your location.');
+        const code = (error as any)?.code;
+        if (code === 'PERMISSION_DENIED') {
+          Alert.alert(
+            'Location Required',
+            'Enable location permission in Settings to check in.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ],
+          );
+        } else {
+          Alert.alert('Location error', error instanceof Error ? error.message : 'Could not get your location.');
+        }
       } finally {
         setActionId(null);
       }
@@ -225,7 +299,19 @@ export default function WorkerHomeScreen(_props: Props) {
             });
             await load();
           } catch (error) {
-            Alert.alert('Could not check out', error instanceof Error ? error.message : 'Please try again.');
+            const code = (error as any)?.code;
+            if (code === 'PERMISSION_DENIED') {
+              Alert.alert(
+                'Location Required',
+                'Enable location permission in Settings to check out.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                ],
+              );
+            } else {
+              Alert.alert('Could not check out', error instanceof Error ? error.message : 'Please try again.');
+            }
           } finally {
             setActionId(null);
           }
@@ -296,6 +382,21 @@ export default function WorkerHomeScreen(_props: Props) {
 
   return (
     <View flex={1} backgroundColor={C.page}>
+      {/* Offline / stale-data banner */}
+      {(networkStatus === 'offline' || isStale) && (
+        <View
+          backgroundColor={isStale ? '#f59e0b' : '#ef4444'}
+          paddingTop={insets.top > 0 ? 4 : 6}
+          paddingBottom={6}
+          alignItems="center"
+        >
+          <Text color="white" fontSize={12} fontWeight="600">
+            {networkStatus === 'offline'
+              ? 'No internet connection — showing cached data'
+              : 'Showing cached data — pull to refresh'}
+          </Text>
+        </View>
+      )}
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={refresh} />}
@@ -1082,12 +1183,39 @@ function DarkMeta({ icon, children }: { icon: React.ReactNode; children: React.R
 async function getCurrentLocation() {
   const permission = await Location.requestForegroundPermissionsAsync();
   if (permission.status !== Location.PermissionStatus.GRANTED) {
-    throw new Error('Location permission is required for attendance.');
+    throw Object.assign(new Error('Location permission denied.'), { code: 'PERMISSION_DENIED' });
   }
 
-  return Location.getCurrentPositionAsync({
+  const GPS_TIMEOUT_MS = 10_000;
+  const MAX_ACCURACY_METERS = 100;
+
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(
+      () =>
+        reject(
+          Object.assign(new Error('GPS timed out. Move to an open area and retry.'), {
+            code: 'GPS_TIMEOUT',
+          }),
+        ),
+      GPS_TIMEOUT_MS,
+    ),
+  );
+
+  const locationPromise = Location.getCurrentPositionAsync({
     accuracy: Location.Accuracy.Balanced,
   });
+
+  const position = await Promise.race([locationPromise, timeoutPromise]);
+
+  const accuracy = position.coords.accuracy ?? 0;
+  if (accuracy > MAX_ACCURACY_METERS) {
+    throw Object.assign(
+      new Error(`GPS accuracy is low (${Math.round(accuracy)} m). Move outdoors and retry.`),
+      { code: 'LOW_ACCURACY', position },
+    );
+  }
+
+  return position;
 }
 
 function pickHeroAssignment(assignments: WorkerAssignment[], selectedDateKey: string) {

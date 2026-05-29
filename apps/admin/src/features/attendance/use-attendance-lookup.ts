@@ -19,8 +19,7 @@ async function fetchByRequirement(requirementId: number): Promise<EnrichedAttend
         .then((r) =>
           r.data.map((rec) => ({
             ...rec,
-            worker_name: a.worker_name,
-            assignment_id: a.id,
+            worker_name: rec.worker_name || a.worker_name,
             requirement_id: requirementId,
           }))
         )
@@ -36,8 +35,7 @@ async function fetchByAssignment(assignmentId: number): Promise<EnrichedAttendan
   const resp = await attendanceService.getAttendanceByAssignment(assignmentId);
   return resp.data.map((rec) => ({
     ...rec,
-    worker_name: `Worker #${rec.worker_profile_id}`,
-    assignment_id: assignmentId,
+    worker_name: rec.worker_name || `Worker #${rec.worker_profile_id}`,
     requirement_id: null,
   }));
 }

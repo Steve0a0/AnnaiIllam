@@ -9,6 +9,7 @@ class CheckInSchema(BaseModel):
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     selfie_url: str | None = Field(default=None, max_length=2048)
+    selfie_token: str | None = Field(default=None, max_length=512)
     qr_code: str | None = Field(default=None, max_length=255)
 
     @field_validator("notes")

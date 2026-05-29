@@ -18,6 +18,7 @@ export type WorkerTabParamList = {
 
 export type EarningsStackParamList = {
   Earnings: undefined;
+  Payments: undefined;
 };
 
 export type HomeStackParamList = {

@@ -20,6 +20,8 @@ export type ClientRequirementListItem = {
   city: string;
   start_date: string;
   status: RequirementStatus;
+  pending_balance_amount: number | null;
+  has_rated: boolean;
 };
 
 export type ClientRequirementDetail = {
@@ -47,7 +49,6 @@ export type ClientRequirementDetail = {
     status: string;
     assigned_role: string | null;
     assigned_shift: string | null;
-    salary_amount: number | null;
     assigned_at: string;
     attendance: Array<{
       id: number;
@@ -124,6 +125,15 @@ export const clientRequirementsService = {
       requirement_status: RequirementStatus;
       quote_status: string;
     }>>(`/client/requirements/${requirementId}/quote-decision`, { action });
+    return res.data.data;
+  },
+
+  cancel: async (requirementId: number, reason: string) => {
+    const res = await http.post<Envelope<{
+      id: number;
+      status: RequirementStatus;
+      cancellation_reason: string;
+    }>>(`/client/requirements/${requirementId}/cancel`, { reason });
     return res.data.data;
   },
 };

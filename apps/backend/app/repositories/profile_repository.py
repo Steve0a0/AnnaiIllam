@@ -38,13 +38,22 @@ def get_all_worker_profiles(db: Session) -> list[WorkerProfile]:
     return list(db.execute(stmt).scalars().all())
 
 
-def get_workers_paginated_stmt(verification_status: str | None = None, city: str | None = None):
+def get_workers_paginated_stmt(
+    verification_status: str | None = None,
+    city: str | None = None,
+    is_available: bool | None = None,
+    category: str | None = None,
+):
     """Return a select statement for worker profiles, with optional filters."""
     stmt = select(WorkerProfile).order_by(WorkerProfile.created_at.desc())
     if verification_status:
         stmt = stmt.where(WorkerProfile.verification_status == verification_status)
     if city:
         stmt = stmt.where(WorkerProfile.city.ilike(f"%{city}%"))
+    if is_available is not None:
+        stmt = stmt.where(WorkerProfile.is_available == is_available)
+    if category:
+        stmt = stmt.where(WorkerProfile.category.ilike(f"%{category}%"))
     return stmt
 
 

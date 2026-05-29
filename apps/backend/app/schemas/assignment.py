@@ -1,4 +1,6 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from datetime import date
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.assignment_constants import AssignmentStatus
 from app.utils.validators import strip_optional_text
@@ -13,11 +15,21 @@ class AssignmentCreateSchema(BaseModel):
     assigned_shift: str | None = Field(default=None, max_length=255)
     salary_amount: int | None = Field(default=None, ge=0)
     notes: str | None = Field(default=None, max_length=1000)
+    start_date: date | None = None
+    end_date: date | None = None
 
     @field_validator("assigned_role", "assigned_shift", "notes")
     @classmethod
     def clean_optional_text(cls, value: str | None) -> str | None:
         return strip_optional_text(value)
+
+    @model_validator(mode="after")
+    def validate_date_range(self):
+        if self.end_date and not self.start_date:
+            raise ValueError("start_date is required when end_date is set")
+        if self.start_date and self.end_date and self.end_date < self.start_date:
+            raise ValueError("end_date must be on or after start_date")
+        return self
 
 
 class AssignmentStatusUpdateSchema(BaseModel):

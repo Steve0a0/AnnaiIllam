@@ -83,14 +83,14 @@ export const workerOnboardingService = {
   },
 
   submitProfile: async (payload: ProfileSubmitPayload): Promise<void> => {
-    await http.post('/worker/onboarding/submit-profile', payload);
+    await http.post('/worker/onboarding/profile', payload);
   },
 
   submitIdentity: async (
     govt_id_key: string,
     selfie_key: string,
   ): Promise<void> => {
-    await http.post('/worker/onboarding/submit-identity', {
+    await http.post('/worker/onboarding/identity', {
       govt_id_key,
       selfie_key,
     });

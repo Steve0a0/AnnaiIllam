@@ -50,4 +50,5 @@ def build_admin_profile(payload, user_id: int) -> AdminProfile:
         user_id=user_id,
         full_name=payload.full_name,
         department=payload.department,
+        permission_group=getattr(payload, "permission_group", "ops_admin") or "ops_admin",
     )

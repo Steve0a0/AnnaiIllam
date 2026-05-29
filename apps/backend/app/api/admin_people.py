@@ -6,16 +6,18 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.roles import require_role
+from app.api.dependencies.roles import require_permission_group, require_role
 from app.core.roles import UserRole
 from app.core.security import hash_password
 from app.db.deps import get_db
+from app.models.admin_profile import AdminProfile, ALLOWED_PERMISSION_GROUPS
 from app.models.client_profile import ClientProfile
 from app.models.user import User
 from app.models.worker_document import WorkerDocument
 from app.models.worker_profile import WorkerProfile
-from app.repositories.auth_repository import create_admin_user, get_user_by_email
+from app.repositories.auth_repository import create_admin_user, get_user_by_email, get_user_by_phone
 from app.repositories.profile_repository import (
+    create_admin_profile,
     create_worker_profile,
     get_clients_paginated_stmt,
     get_workers_paginated_stmt,
@@ -38,9 +40,9 @@ class WorkerAvailabilityToggleSchema(BaseModel):
 class AdminWorkerUpdateSchema(BaseModel):
     city: str | None = Field(default=None, min_length=2, max_length=100)
     state: str | None = Field(default=None, min_length=2, max_length=100)
-    skills: str | None = Field(default=None, max_length=2000)
-    available_days: str | None = Field(default=None, max_length=100)
-    available_shifts: str | None = Field(default=None, max_length=100)
+    skills: list[str] | None = None
+    available_days: list[str] | None = None
+    available_shifts: list[str] | None = None
     is_available: bool | None = None
     phone: str | None = Field(default=None, max_length=20)
     email: str | None = Field(default=None, max_length=255)
@@ -287,11 +289,18 @@ def deactivate_admin_client(
 def list_admin_workers(
     verification_status: str | None = Query(None, description="Filter by verification_status"),
     city: str | None = Query(None, description="Filter by city (partial match)"),
+    is_available: bool | None = Query(None, description="Filter by availability"),
+    category: str | None = Query(None, description="Filter by category (partial match)"),
     pg: PaginationParams = Depends(),
     current_user: User = Depends(require_role(UserRole.ADMIN.value)),
     db: Session = Depends(get_db),
 ):
-    stmt = get_workers_paginated_stmt(verification_status=verification_status, city=city)
+    stmt = get_workers_paginated_stmt(
+        verification_status=verification_status,
+        city=city,
+        is_available=is_available,
+        category=category,
+    )
     workers, total = paginate(stmt, db, pg)
     user_ids = [item.user_id for item in workers]
     users_by_id = {}
@@ -527,7 +536,7 @@ def approve_worker(
         user_id=user_id,
         title="Profile Approved!",
         body="Congratulations! Your profile has been approved. Please complete biometric setup to start working.",
-        data={"type": "worker_approved"},
+        data={"type": "worker_approved", "screen": "HomeTab"},
     )
 
     return success_response("Worker approved", {"user_id": user_id, "onboarding_step": "approved"})
@@ -745,7 +754,15 @@ def update_admin_worker(
         profile.is_available = payload.is_available
     if user:
         if payload.phone is not None:
-            user.phone = payload.phone
+            normalized_phone = payload.phone.strip()
+            if normalized_phone != user.phone:
+                existing = get_user_by_phone(db, normalized_phone)
+                if existing:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Phone number is already in use by another account",
+                    )
+            user.phone = normalized_phone
         if payload.email is not None:
             user.email = payload.email
 
@@ -767,6 +784,13 @@ def list_admin_users(
     users = db.execute(
         select(User).where(User.role == UserRole.ADMIN.value).order_by(User.created_at)
     ).scalars().all()
+    user_ids = [u.id for u in users]
+    profiles_by_user_id: dict[int, AdminProfile] = {}
+    if user_ids:
+        profiles = db.execute(
+            select(AdminProfile).where(AdminProfile.user_id.in_(user_ids))
+        ).scalars().all()
+        profiles_by_user_id = {p.user_id: p for p in profiles}
     return success_response(
         "Admin users fetched successfully",
         [
@@ -776,18 +800,32 @@ def list_admin_users(
                 "name": u.name,
                 "is_active": u.is_active,
                 "created_at": u.created_at.isoformat(),
+                "permission_group": profiles_by_user_id[u.id].permission_group
+                if u.id in profiles_by_user_id
+                else None,
             }
             for u in users
         ],
     )
 
 
+class AdminUserCreateWithGroupSchema(AdminUserCreateSchema):
+    permission_group: str = "ops_admin"
+
+
 @router.post("/admin-users", status_code=status.HTTP_201_CREATED)
 def create_admin_user_endpoint(
-    payload: AdminUserCreateSchema,
-    current_user: User = Depends(require_role(UserRole.ADMIN.value)),
+    payload: AdminUserCreateWithGroupSchema,
+    current_user: User = Depends(require_permission_group("super_admin")),
     db: Session = Depends(get_db),
 ):
+    normalized_group = payload.permission_group.strip().lower()
+    if normalized_group not in ALLOWED_PERMISSION_GROUPS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"permission_group must be one of: {', '.join(sorted(ALLOWED_PERMISSION_GROUPS))}",
+        )
+
     existing = get_user_by_email(db, payload.email)
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already in use")
@@ -798,11 +836,25 @@ def create_admin_user_endpoint(
         name=payload.name,
         password_hash=hash_password(payload.password),
     )
+    db.flush()
+
+    profile = AdminProfile(
+        user_id=user.id,
+        full_name=payload.name,
+        permission_group=normalized_group,
+    )
+    create_admin_profile(db, profile)
     db.commit()
 
     audit_event("admin_user_created", {"new_user_id": user.id, "created_by": current_user.id})
 
     return success_response(
         "Admin user created",
-        {"id": user.id, "email": user.email, "name": user.name, "is_active": user.is_active},
+        {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "is_active": user.is_active,
+            "permission_group": normalized_group,
+        },
     )

@@ -133,7 +133,7 @@ def create_replacement_for_assignment(
             user_id=old_worker_profile.user_id,
             title="Assignment Update",
             body="You have been replaced on one of your assignments. Please contact admin for details.",
-            data={"type": "worker_replaced", "assignment_id": old_assignment.id},
+            data={"type": "worker_replaced", "assignment_id": old_assignment.id, "screen": "JobsTab"},
         )
 
     if new_worker_profile and new_worker_profile.user_id:
@@ -143,7 +143,7 @@ def create_replacement_for_assignment(
             user_id=new_worker_profile.user_id,
             title="New Assignment",
             body="You have been assigned to a new job. Please check your assignments for details.",
-            data={"type": "new_assignment", "assignment_id": new_assignment.id},
+            data={"type": "new_assignment", "assignment_id": new_assignment.id, "screen": "HomeTab"},
         )
 
     audit_event(

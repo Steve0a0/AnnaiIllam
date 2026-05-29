@@ -114,30 +114,33 @@ export default function AssignmentAttendanceList({
                   {item.notes || "-"}
                 </td>
                 <td className="px-4 py-3 text-right text-sm">
-                  <div className="flex items-center justify-end gap-2">
-                  {item.status !== "approved" ? (
-                    <Button
+                  <div className="flex items-center justify-end gap-3">
+                    {item.status !== "approved" ? (
+                      <Button
+                        type="button"
+                        variant="accent"
+                        size="sm"
+                        disabled={verifyingId === item.id}
+                        onClick={() => verifyAttendance(item.id)}
+                      >
+                        {verifyingId === item.id ? "Saving..." : "Verify"}
+                      </Button>
+                    ) : (
+                      <span className="text-xs font-medium text-emerald-600">
+                        ✓ Approved
+                      </span>
+                    )}
+                    <button
                       type="button"
-                      variant="accent"
-                      size="sm"
-                      disabled={verifyingId === item.id}
-                      onClick={() => verifyAttendance(item.id)}
+                      onClick={() =>
+                        setEditingAttendanceId(
+                          editingAttendanceId === item.id ? null : item.id
+                        )
+                      }
+                      className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
                     >
-                      {verifyingId === item.id ? "Saving..." : "Verify"}
-                    </Button>
-                  ) : null}
-                  <Button
-                    type="button"
-                    onClick={() =>
-                      setEditingAttendanceId(
-                        editingAttendanceId === item.id ? null : item.id
-                      )
-                    }
-                    variant="secondary"
-                    size="sm"
-                  >
-                    {editingAttendanceId === item.id ? "Close" : "Correct"}
-                  </Button>
+                      {editingAttendanceId === item.id ? "Close" : "Edit"}
+                    </button>
                   </div>
                 </td>
               </tr>

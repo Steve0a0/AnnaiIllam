@@ -259,10 +259,10 @@ def submit_profile(
         db.add(profile)
 
     profile.full_name = payload.full_name.strip()
-    profile.skills = ",".join(payload.skills)
+    profile.skills = payload.skills
     profile.experience_years = payload.experience_years
-    profile.available_days = ",".join(payload.available_days)
-    profile.available_shifts = ",".join(payload.available_shifts)
+    profile.available_days = payload.available_days
+    profile.available_shifts = payload.available_shifts
     profile.city = payload.city.strip()
     profile.state = payload.state.strip()
     # category defaults to "general" until admin sets it during review

@@ -45,8 +45,15 @@ export const peopleService = {
     return res.data;
   },
 
-  getWorkers: async (): Promise<AdminWorkersResponse> => {
-    const res = await http.get("/admin/people/workers");
+  getWorkers: async (params?: {
+    verification_status?: string;
+    is_available?: boolean;
+    category?: string;
+    city?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<AdminWorkersResponse> => {
+    const res = await http.get("/admin/people/workers", { params });
     return res.data;
   },
 

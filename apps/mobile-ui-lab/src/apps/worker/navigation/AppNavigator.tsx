@@ -10,6 +10,7 @@ import JobDetailScreen from '../screens/JobDetailScreen';
 import AvailabilityScreen from '../screens/AvailabilityScreen';
 import AttendanceHistoryScreen from '../screens/AttendanceHistoryScreen';
 import EarningsScreen from '../screens/EarningsScreen';
+import PaymentScreen from '../screens/PaymentScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import IssuesScreen from '../screens/IssuesScreen';
 import RaiseIssueScreen from '../screens/RaiseIssueScreen';
@@ -72,6 +73,7 @@ function EarningsStackNavigator() {
   return (
     <EarningsStack.Navigator screenOptions={{ headerShown: false }}>
       <EarningsStack.Screen name="Earnings" component={EarningsScreen} />
+      <EarningsStack.Screen name="Payments" component={PaymentScreen} />
     </EarningsStack.Navigator>
   );
 }
