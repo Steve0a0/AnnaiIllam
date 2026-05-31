@@ -34,8 +34,8 @@ export default function ComplaintsReportPage() {
 
   return (
     <ReportTableWrapper
-      title="Complaints Report"
-      subtitle="View complaint records with severity and status."
+      title="Complaints"
+      subtitle="Complaint records with severity and resolution status."
       filters={
         <ReportFilters
           filters={filters}
@@ -45,12 +45,7 @@ export default function ComplaintsReportPage() {
       }
       rowCount={items.length}
       actions={
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={handleExport}
-          disabled={exporting}
-        >
+        <Button type="button" variant="secondary" onClick={handleExport} disabled={exporting}>
           <FileDown />
           {exporting ? "Exporting…" : "Export CSV"}
         </Button>
@@ -59,62 +54,44 @@ export default function ComplaintsReportPage() {
       {isLoading ? <ReportsLoading /> : null}
       {isError ? <ReportsError message={error?.message} /> : null}
       {!isLoading && !isError && !items.length ? (
-        <ReportsEmpty label="complaints report records" />
+        <ReportsEmpty label="complaints" />
       ) : null}
       {!isLoading && !isError && items.length ? (
-      <table className="min-w-full divide-y divide-slate-200">
-        <thead className="bg-slate-50">
-          <tr>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              ID
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Requirement
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Assignment
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Type
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Severity
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Status
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Created At
-            </th>
-          </tr>
-        </thead>
-
-        <tbody className="divide-y divide-slate-100">
-          {items.map((item) => (
-            <tr key={item.id}>
-              <td className="px-4 py-3 text-sm text-slate-700">{item.id}</td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                {item.requirement_id}
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                {item.assignment_id ?? "-"}
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                {item.complaint_type.replaceAll("_", " ")}
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                <StatusBadge value={item.severity} />
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                <StatusBadge value={item.status} />
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                {item.created_at}
-              </td>
+        <table className="min-w-full">
+          <thead>
+            <tr className="border-b border-border bg-muted/30">
+              {["ID", "Requirement", "Assignment", "Type", "Severity", "Status", "Created"].map((h) => (
+                <th
+                  key={h}
+                  className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground"
+                >
+                  {h}
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {items.map((item) => (
+              <tr key={item.id} className="transition-colors hover:bg-muted/20">
+                <td className="px-4 py-3 text-sm tabular-nums text-muted-foreground">{item.id}</td>
+                <td className="px-4 py-3 text-sm tabular-nums text-foreground">{item.requirement_id}</td>
+                <td className="px-4 py-3 text-sm tabular-nums text-foreground">{item.assignment_id ?? "—"}</td>
+                <td className="px-4 py-3 text-sm text-foreground">{item.complaint_type.replaceAll("_", " ")}</td>
+                <td className="px-4 py-3">
+                  <StatusBadge value={item.severity} />
+                </td>
+                <td className="px-4 py-3">
+                  <StatusBadge value={item.status} />
+                </td>
+                <td className="px-4 py-3 text-sm tabular-nums text-muted-foreground">
+                  {new Date(item.created_at).toLocaleDateString(undefined, {
+                    dateStyle: "medium",
+                  })}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       ) : null}
     </ReportTableWrapper>
   );

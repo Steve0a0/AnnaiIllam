@@ -1,4 +1,5 @@
 import logging
+from datetime import date as date_type
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
@@ -52,7 +53,7 @@ def list_all_attendance(
         .limit(limit)
     )
 
-    stmt = stmt.where(Attendance.attendance_date == effective_date)
+    stmt = stmt.where(Attendance.attendance_date == date_type.fromisoformat(effective_date))
 
     if requirement_id is not None:
         stmt = stmt.where(Assignment.requirement_id == requirement_id)

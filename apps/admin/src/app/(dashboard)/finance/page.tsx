@@ -43,7 +43,7 @@ export default function FinancePage() {
     setPaymentsError(null);
     try {
       const res = await financeService.listAllClientPayments();
-      setPayments(res.data);
+      setPayments(res.data.items);
     } catch {
       setPaymentsError("Could not load payments. Check your connection.");
     } finally {
@@ -503,7 +503,7 @@ function PayrollQueue({
             {/* Worker rows */}
             <div className="divide-y divide-slate-100">
               {run.items.map((item) => {
-                const initials = item.worker_name
+                const initials = (item.worker_name ?? "?")
                   .split(" ")
                   .slice(0, 2)
                   .map((w) => w[0])

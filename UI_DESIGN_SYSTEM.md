@@ -5,13 +5,13 @@
 
 ## Design Direction
 
-**Aesthetic:** Refined industrial — the visual language of serious operations software.
+**Aesthetic:** Precise and operational — the visual language of serious operations software.
 Clean, authoritative, and quietly premium. Not sterile SaaS. Not cluttered enterprise.
 The kind of tool that makes a site supervisor or HR manager feel in control.
 
 **What makes this system unforgettable:**
 - A deep forest green that reads as ownership, not decoration
-- Typography that switches between serif authority and sans-serif clarity
+- Single sans-serif family (Geist) — hierarchy through weight and size, not font mixing
 - Every status is colour-coded with semantic precision — users build muscle memory
 - The worker app is so stripped back it feels like hardware, not software
 
@@ -29,36 +29,41 @@ The kind of tool that makes a site supervisor or HR manager feel in control.
 All colors are defined as CSS variables (admin) or Tamagui tokens (mobile).
 Use token names in code. Never hardcode hex values directly.
 
+All colors defined in OKLCH. Brand and neutral ramps share hue 145, so the
+forest-green primary and the page background belong to the same colour family.
+
 #### Primary Palette
 
 ```
---color-brand-900:    #0D2E1E   Darkest — sidebar bg, deep surfaces
---color-brand-800:    #113D28   Dark surface backgrounds
---color-brand-700:    #165233   Primary action bg (hover)
---color-brand-600:    #1A6640   Primary — buttons, active nav, key icons
---color-brand-500:    #1D7A4A   Slightly lighter primary
---color-brand-400:    #25A263   Hover accent
---color-brand-300:    #4DBF87   Lighter accent, icon tint on dark bg
---color-brand-200:    #A8DFBF   Tint background
---color-brand-100:    #D4F0E3   Very light tint, selected states
---color-brand-50:     #EDFAF3   Lightest — hover bg, active card bg
+--color-brand-900:  oklch(0.19 0.054 145)   Sidebar bg, deepest surfaces
+--color-brand-800:  oklch(0.26 0.072 145)   Dark surface backgrounds
+--color-brand-700:  oklch(0.34 0.094 145)   Primary action bg (hover)
+--color-brand-600:  oklch(0.42 0.115 145)   Primary — buttons, active nav
+--color-brand-500:  oklch(0.51 0.118 145)   Slightly lighter primary
+--color-brand-400:  oklch(0.61 0.112 145)   Hover accent, check-in button
+--color-brand-300:  oklch(0.72 0.095 145)   Lighter accent, icon tint on dark
+--color-brand-200:  oklch(0.83 0.056 145)   Tint background
+--color-brand-100:  oklch(0.91 0.026 145)   Very light tint, selected states
+--color-brand-50:   oklch(0.95 0.013 145)   Hover bg, active card bg
 ```
 
-#### Neutral Palette (Warm — not cold grey)
+#### Neutral Palette (green-tinted, hue 145 — same family as brand)
+
+All neutrals are verified for 4.5:1 contrast on the page background
+oklch(0.97 0.008 145). --color-neutral-400 is visual-only (disabled states).
 
 ```
---color-neutral-950:  #0C0A09   True black
---color-neutral-900:  #1C1917   Near-black — primary headings
---color-neutral-800:  #292524   Dark body text
---color-neutral-700:  #44403C   Body text
---color-neutral-600:  #57534E   Secondary text
---color-neutral-500:  #78716C   Muted text, placeholders
---color-neutral-400:  #A8A29E   Disabled text, hints
---color-neutral-300:  #D6D3D1   Borders, dividers
---color-neutral-200:  #E7E5E4   Subtle borders
---color-neutral-100:  #F5F5F4   Page background
---color-neutral-50:   #FAFAF9   Card background (warm off-white)
---color-white:        #FFFFFF   Input bg, pure white surfaces
+--color-neutral-950: oklch(0.14 0.005 145)   Near-black
+--color-neutral-900: oklch(0.20 0.006 145)   Primary text  ≥12:1
+--color-neutral-800: oklch(0.28 0.005 145)   Dark body text
+--color-neutral-700: oklch(0.38 0.005 145)   Body text
+--color-neutral-600: oklch(0.44 0.005 145)   Secondary text  ≥5.0:1
+--color-neutral-500: oklch(0.48 0.005 145)   Muted / placeholder  ≥4.7:1
+--color-neutral-400: oklch(0.62 0.004 145)   Disabled (visual only)
+--color-neutral-300: oklch(0.82 0.003 145)   Borders, dividers
+--color-neutral-200: oklch(0.90 0.003 145)   Subtle borders
+--color-neutral-100: oklch(0.95 0.003 145)   Hover backgrounds
+--color-neutral-50:  oklch(0.99 0.001 145)   Card background (near-white)
 ```
 
 #### Semantic Palette
@@ -105,17 +110,15 @@ Teal (In Progress / Checked In)
 
 ```
 Admin web:
-  --surface-page:          #F5F5F4
-  --surface-card:          #FFFFFF
-  --surface-sidebar:       #0D2E1E
-  --surface-sidebar-hover: #1A4A2A
-  --surface-elevated:      #FFFFFF
-  --surface-subtle:        #FAFAF9
+  --background:        oklch(0.97 0.008 145)   Page bg — slight green tint
+  --card:              oklch(1 0 0)             Pure white cards
+  --sidebar:           oklch(0.19 0.054 145)    Dark brand green
+  --muted:             oklch(0.95 0.003 145)    Hover / subtle bg
 
 Mobile:
-  --surface-page-mobile:   #F5F5F4
-  --surface-card-mobile:   #FFFFFF
-  --surface-bottom-bar:    #FFFFFF
+  --surface-page-mobile:   oklch(0.97 0.008 145)
+  --surface-card-mobile:   oklch(1 0 0)
+  --surface-bottom-bar:    oklch(1 0 0)
 ```
 
 ---
@@ -124,17 +127,16 @@ Mobile:
 
 ### Font Stack
 
-```
-Display:    'Fraunces', serif
-            Used for: Large headings, dashboard numbers, modal titles
-            Weights:  400 (regular), 600 (semibold)
-            Note:     Italic variant used for editorial emphasis
+Single sans-serif system. No serif anywhere. Hierarchy through weight and size.
 
-UI / Body:  'Geist', sans-serif
-            Used for: All interface text, labels, buttons, body copy
-            Weights:  300 (light), 400 (regular), 500 (medium)
+```
+UI / Body / Headings / Display:
+            'Geist', sans-serif
+            Loaded via next/font/google, CSS var: --font-geist
+            Weights: 400 (body), 500 (labels, UI), 600 (headings), 700 (display numbers)
 
 Mono:       'Geist Mono', monospace
+            Loaded via next/font/google, CSS var: --font-geist-mono
             Used for: Amounts, timestamps, ID codes, invoice numbers
             Weights:  400, 500
 ```
@@ -142,28 +144,30 @@ Mono:       'Geist Mono', monospace
 ### Font Installation
 
 ```
-Admin (Next.js — use next/font/google):
-  Fraunces:  weights 400, 600
-  Geist:     weights 300, 400, 500
-  Geist Mono: weights 400, 500
+Admin (Next.js — layout.tsx):
+  import { Geist, Geist_Mono } from "next/font/google"
+  Geist({ subsets: ["latin"], variable: "--font-geist" })
+  Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" })
 
-Mobile (Expo):
-  @expo-google-fonts/fraunces
-  @expo-google-fonts/geist
-  (Geist Mono via @expo-google-fonts/geist-mono)
+Mobile (Expo — update pending):
+  @expo-google-fonts/geist          (replaces fraunces for headings)
+  @expo-google-fonts/geist-mono
 ```
 
 ### Type Scale
 
+All roles use Geist. Fixed rem scale (ratio ~1.2). No fluid clamp in product UI.
+Display number slots (display-xl/lg) previously used Fraunces — now Geist 700.
+
 ```
 NAME          SIZE    LINE-H   WEIGHT   TRACKING   USE
 ────────────────────────────────────────────────────────────────────
-display-xl    48px    1.1      600      -0.03em    Dashboard hero numbers
-display-lg    36px    1.15     600      -0.025em   Large KPI numbers
+display-xl    48px    1.1      700      -0.03em    Dashboard hero numbers
+display-lg    36px    1.15     700      -0.025em   Large KPI numbers
 display-md    28px    1.2      600      -0.02em    Modal titles, page headers
-heading-xl    24px    1.25     500      -0.015em   Page titles
-heading-lg    20px    1.3      500      -0.01em    Card titles, panel headers
-heading-md    18px    1.35     500      -0.01em    Section titles
+heading-xl    24px    1.25     600      -0.015em   Page titles
+heading-lg    20px    1.3      600      -0.01em    Card titles, panel headers
+heading-md    18px    1.35     600      -0.01em    Section titles
 heading-sm    16px    1.4      500      -0.005em   Subsection titles
 body-lg       15px    1.6      400      0          Primary body text
 body-md       14px    1.6      400      0          Secondary body, table rows
@@ -179,28 +183,28 @@ mono-sm       12px    1.5      400      0          Small codes
 ### Typography Rules
 
 ```
-1. Fraunces is used ONLY for:
-   - Page headings and modal primary titles
-   - Large KPI and stat numbers
-   - Do NOT use for body text, labels, or buttons
+1. Geist covers ALL roles — headings, display numbers, labels, body, buttons, nav.
+   No serif face anywhere on any surface.
 
-2. Geist covers everything else:
-   - Navigation labels, button text, form labels, body copy
-   - Table content, helper text, placeholders
+2. Weight governs hierarchy:
+   700 → display numbers (KPI, hero stats)
+   600 → headings (page title, card title, modal title, section title)
+   500 → labels, form labels, table headers, nav items, buttons
+   400 → body copy, table rows, descriptions
 
-3. Geist Mono covers:
+3. Geist Mono covers data:
    - All currency amounts (₹18,400)
-   - Date and time values (06:00 – 14:00)
+   - Date and time values (06:00–14:00)
    - Reference codes and IDs (INV-0042)
-   - Any stat number inside a KPI card
+   - Stat numbers inside KPI cards
 
-4. Maximum font weights in use: 300, 400, 500
-   Never use 600+ for Geist (only Fraunces uses 600)
-
-5. ALL CAPS is permitted only for label-sm eyebrow text
+4. ALL CAPS permitted only for label-sm eyebrow text (≤4 words)
    Examples: "TODAY'S SHIFT", "ACTIVE JOBS", "THIS WEEK"
 
-6. Tracking widens on small labels, tightens on large display
+5. Letter-spacing floor on display sizes: -0.04em. Nothing tighter.
+   Tracking widens on small labels, tightens on large display.
+
+6. text-wrap: balance on h1–h3; text-wrap: pretty on long prose.
 ```
 
 ---
@@ -1169,16 +1173,16 @@ Complete config for `apps/mobile-ui-lab/tamagui.config.ts`:
 ```typescript
 export const tokens = createTokens({
   color: {
-    // Brand
-    brand900: '#0D2E1E', brand800: '#113D28', brand700: '#165233',
-    brand600: '#1A6640', brand500: '#1D7A4A', brand400: '#25A263',
-    brand300: '#4DBF87', brand200: '#A8DFBF', brand100: '#D4F0E3',
-    brand50:  '#EDFAF3',
-    // Neutrals
-    neutral950: '#0C0A09', neutral900: '#1C1917', neutral800: '#292524',
-    neutral700: '#44403C', neutral600: '#57534E', neutral500: '#78716C',
-    neutral400: '#A8A29E', neutral300: '#D6D3D1', neutral200: '#E7E5E4',
-    neutral100: '#F5F5F4', neutral50: '#FAFAF9', white: '#FFFFFF',
+    // Brand — OKLCH hue 145 (expressed as approximate hex for Tamagui compatibility)
+    brand900: '#0D241A', brand800: '#152E20', brand700: '#1F4028',
+    brand600: '#28652F', brand500: '#327A3C', brand400: '#3E8F4E',
+    brand300: '#5EAA6E', brand200: '#90C59B', brand100: '#C0DFC6',
+    brand50:  '#DFF0E3',
+    // Neutrals — green-tinted, hue 145 (approximate hex)
+    neutral950: '#161A17', neutral900: '#1E2320', neutral800: '#2A302B',
+    neutral700: '#3B4039', neutral600: '#4A504A', neutral500: '#525852',
+    neutral400: '#747A74', neutral300: '#C0C5C0', neutral200: '#D8DDD8',
+    neutral100: '#EAEDEA', neutral50:  '#F8FAF8', white: '#FFFFFF',
     // Semantic
     success700: '#15803D', success500: '#22C55E',
     success100: '#DCFCE7', success50: '#F0FDF4',
@@ -1206,17 +1210,17 @@ export const tokens = createTokens({
 
 export const fonts = {
   heading: createFont({
-    family: 'Fraunces_400Regular',
+    family: 'Geist_700Bold',     /* no serif — 700 for display numbers, 600 for headings */
     size: { 1: 48, 2: 36, 3: 28, 4: 24, 5: 20, 6: 18, 7: 16, true: 20 },
     lineHeight: { 1: 52, 2: 41, 3: 33, 4: 30, 5: 26, 6: 24, true: 26 },
-    weight: { 1: '400', 2: '600', true: '500' },
+    weight: { 1: '700', 2: '700', 3: '600', 4: '600', 5: '600', true: '600' },
     letterSpacing: { 1: -1.44, 2: -0.9, 3: -0.56, true: -0.48 },
   }),
   body: createFont({
     family: 'Geist_400Regular',
     size: { 1: 15, 2: 14, 3: 13, 4: 12, 5: 11, true: 14 },
     lineHeight: { 1: 24, 2: 22, 3: 20, 4: 18, 5: 16, true: 22 },
-    weight: { 1: '300', 2: '400', 3: '500', true: '400' },
+    weight: { 1: '400', 2: '400', 3: '500', true: '400' },
     letterSpacing: { 1: 0, 2: 0, 3: 0.26, 4: 0.26, 5: 0.44, true: 0 },
   }),
   mono: createFont({
@@ -1230,12 +1234,12 @@ export const fonts = {
 
 export const themes = {
   light: {
-    background: '$neutral100',
-    backgroundHover: '$neutral50',
+    background: '#F0F5F1',        /* oklch(0.97 0.008 145) approximation */
+    backgroundHover: '$neutral100',
     backgroundPress: '$neutral200',
     color: '$neutral900',
     colorHover: '$neutral950',
-    placeholderColor: '$neutral400',
+    placeholderColor: '$neutral500', /* darkened — meets 4.5:1 on bg */
     borderColor: '$neutral200',
     borderColorHover: '$neutral300',
     shadowColor: 'rgba(0,0,0,0.08)',
@@ -1264,83 +1268,46 @@ The CSS custom properties below (in `globals.css`) act as the design token bridg
 
 ### Global CSS Variables
 
-For `apps/admin/src/app/globals.css`:
+See `apps/admin/src/app/globals.css` for the canonical source. Summary of key tokens:
 
 ```css
 :root {
-  /* Brand */
-  --color-brand-900: #0D2E1E;
-  --color-brand-800: #113D28;
-  --color-brand-700: #165233;
-  --color-brand-600: #1A6640;
-  --color-brand-400: #25A263;
-  --color-brand-300: #4DBF87;
-  --color-brand-100: #D4F0E3;
-  --color-brand-50:  #EDFAF3;
+  /* Brand ramp — OKLCH hue 145 */
+  --color-brand-900: oklch(0.19 0.054 145);   /* sidebar bg */
+  --color-brand-600: oklch(0.42 0.115 145);   /* primary action */
+  --color-brand-400: oklch(0.61 0.112 145);   /* hover, check-in */
+  --color-brand-100: oklch(0.91 0.026 145);   /* tint bg */
+  --color-brand-50:  oklch(0.95 0.013 145);   /* active card bg */
 
-  /* Text */
-  --color-text-primary:    #1C1917;
-  --color-text-secondary:  #57534E;
-  --color-text-tertiary:   #78716C;
-  --color-text-disabled:   #A8A29E;
+  /* Neutral ramp — OKLCH hue 145, low chroma */
+  --color-neutral-900: oklch(0.20 0.006 145); /* primary text */
+  --color-neutral-600: oklch(0.44 0.005 145); /* secondary text ≥5:1 */
+  --color-neutral-500: oklch(0.48 0.005 145); /* muted/placeholder ≥4.7:1 */
+  --color-neutral-400: oklch(0.62 0.004 145); /* disabled — visual only */
+  --color-neutral-200: oklch(0.90 0.003 145); /* subtle borders */
+  --color-neutral-100: oklch(0.95 0.003 145); /* hover bg */
 
   /* Surfaces */
-  --surface-page:          #F5F5F4;
-  --surface-card:          #FFFFFF;
-  --surface-subtle:        #FAFAF9;
-  --surface-sidebar:       #0D2E1E;
-  --surface-overlay:       rgba(0, 0, 0, 0.45);
+  --background:   oklch(0.97 0.008 145);      /* page bg — slight green tint */
+  --card:         oklch(1 0 0);               /* white cards */
+  --sidebar:      var(--color-brand-900);
 
-  /* Borders */
-  --border-subtle:         #E7E5E4;
-  --border-default:        #D6D3D1;
-  --border-strong:         #A8A29E;
-  --border-brand:          #1A6640;
-
-  /* Semantic */
-  --success:        #22C55E; --success-bg: #DCFCE7; --success-text: #15803D;
-  --warning:        #F59E0B; --warning-bg: #FEF3C7; --warning-text: #B45309;
-  --danger:         #EF4444; --danger-bg:  #FEE2E2; --danger-text:  #B91C1C;
-  --info:           #3B82F6; --info-bg:    #DBEAFE; --info-text:    #1D4ED8;
-  --purple:         #8B5CF6; --purple-bg:  #EDE9FE; --purple-text:  #6D28D9;
-  --teal:           #06B6D4; --teal-bg:    #CFFAFE; --teal-text:    #0E7490;
-
-  /* Typography */
-  --font-display: 'Fraunces', Georgia, serif;
-  --font-ui:      'Geist', system-ui, sans-serif;
-  --font-mono:    'Geist Mono', ui-monospace, monospace;
+  /* Typography — no serif */
+  --font-primary: var(--font-geist), system-ui, sans-serif;
+  --font-code:    var(--font-geist-mono), ui-monospace, monospace;
 
   /* Shadows */
-  --shadow-xs:    0 1px 2px rgba(0,0,0,0.04);
-  --shadow-sm:    0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-md:    0 4px 6px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.04);
-  --shadow-lg:    0 10px 15px rgba(0,0,0,0.07), 0 4px 6px rgba(0,0,0,0.04);
-  --shadow-xl:    0 20px 25px rgba(0,0,0,0.08), 0 8px 10px rgba(0,0,0,0.04);
-  --shadow-brand: 0 4px 14px rgba(26,102,64,0.25);
+  --shadow-brand: 0 4px 14px oklch(0.42 0.115 145 / 0.25);
 
-  /* Radius */
-  --radius-sm:    4px;
-  --radius-md:    8px;
-  --radius-lg:    12px;
-  --radius-xl:    16px;
-  --radius-2xl:   24px;
-  --radius-full:  9999px;
-
-  /* Transitions */
-  --transition-fast:   0.12s ease;
-  --transition-base:   0.15s ease;
-  --transition-slow:   0.25s ease;
-  --transition-spring: cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-* {
-  box-sizing: border-box;
+  /* Z-index scale */
+  --z-dropdown: 100; --z-sticky: 200; --z-modal-backdrop: 300;
+  --z-modal: 400;    --z-toast: 500;  --z-tooltip: 600;
 }
 
 body {
-  font-family: var(--font-ui);
-  background-color: var(--surface-page);
-  color: var(--color-text-primary);
+  font-family: var(--font-primary);
+  background: var(--background);
+  color: var(--color-neutral-900);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

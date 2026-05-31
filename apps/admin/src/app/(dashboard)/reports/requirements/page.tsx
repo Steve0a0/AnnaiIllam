@@ -42,8 +42,8 @@ export default function RequirementsReportPage() {
 
   return (
     <ReportTableWrapper
-      title="Requirements Report"
-      subtitle="View all requirements with key business fields."
+      title="Requirements"
+      subtitle="All requirements with key business fields."
       filters={
         <ReportFilters
           filters={filters}
@@ -53,12 +53,7 @@ export default function RequirementsReportPage() {
       }
       rowCount={items.length}
       actions={
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={handleExport}
-          disabled={exporting}
-        >
+        <Button type="button" variant="secondary" onClick={handleExport} disabled={exporting}>
           <FileDown />
           {exporting ? "Exporting…" : "Export CSV"}
         </Button>
@@ -67,60 +62,38 @@ export default function RequirementsReportPage() {
       {isLoading ? <ReportsLoading /> : null}
       {isError ? <ReportsError message={error?.message} /> : null}
       {!isLoading && !isError && !items.length ? (
-        <ReportsEmpty label="requirements report records" />
+        <ReportsEmpty label="requirements" />
       ) : null}
       {!isLoading && !isError && items.length ? (
-      <table className="min-w-full divide-y divide-slate-200">
-        <thead className="bg-slate-50">
-          <tr>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              ID
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Client
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Category
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              City
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Workers
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Start Date
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Status
-            </th>
-          </tr>
-        </thead>
-
-        <tbody className="divide-y divide-slate-100">
-          {items.map((item) => (
-            <tr key={item.id}>
-              <td className="px-4 py-3 text-sm text-slate-700">{item.id}</td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                {item.client_id}
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                {item.category}
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-700">{item.city}</td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                {item.number_of_workers}
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                {item.start_date}
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                <StatusBadge value={item.status} />
-              </td>
+        <table className="min-w-full">
+          <thead>
+            <tr className="border-b border-border bg-muted/30">
+              {["ID", "Client", "Category", "City", "Workers", "Start Date", "Status"].map((h) => (
+                <th
+                  key={h}
+                  className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground"
+                >
+                  {h}
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {items.map((item) => (
+              <tr key={item.id} className="transition-colors hover:bg-muted/20">
+                <td className="px-4 py-3 text-sm tabular-nums text-muted-foreground">{item.id}</td>
+                <td className="px-4 py-3 text-sm text-foreground">{item.client_id}</td>
+                <td className="px-4 py-3 text-sm text-foreground">{item.category}</td>
+                <td className="px-4 py-3 text-sm text-foreground">{item.city}</td>
+                <td className="px-4 py-3 text-sm tabular-nums text-foreground">{item.number_of_workers}</td>
+                <td className="px-4 py-3 text-sm tabular-nums text-foreground">{item.start_date}</td>
+                <td className="px-4 py-3">
+                  <StatusBadge value={item.status} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       ) : null}
     </ReportTableWrapper>
   );

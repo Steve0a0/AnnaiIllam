@@ -39,8 +39,8 @@ export default function AssignmentsReportPage() {
 
   return (
     <ReportTableWrapper
-      title="Assignments Report"
-      subtitle="View all active assignment records."
+      title="Assignments"
+      subtitle="Worker assignment records across all requirements."
       filters={
         <ReportFilters
           filters={filters}
@@ -50,12 +50,7 @@ export default function AssignmentsReportPage() {
       }
       rowCount={items.length}
       actions={
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={handleExport}
-          disabled={exporting}
-        >
+        <Button type="button" variant="secondary" onClick={handleExport} disabled={exporting}>
           <FileDown />
           {exporting ? "Exporting…" : "Export CSV"}
         </Button>
@@ -64,64 +59,40 @@ export default function AssignmentsReportPage() {
       {isLoading ? <ReportsLoading /> : null}
       {isError ? <ReportsError message={error?.message} /> : null}
       {!isLoading && !isError && !items.length ? (
-        <ReportsEmpty label="assignments report records" />
+        <ReportsEmpty label="assignments" />
       ) : null}
       {!isLoading && !isError && items.length ? (
-      <table className="min-w-full divide-y divide-slate-200">
-        <thead className="bg-slate-50">
-          <tr>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              ID
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Requirement
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Worker
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Role
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Shift
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Salary
-            </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-              Status
-            </th>
-          </tr>
-        </thead>
-
-        <tbody className="divide-y divide-slate-100">
-          {items.map((item) => (
-            <tr key={item.id}>
-              <td className="px-4 py-3 text-sm text-slate-700">{item.id}</td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                {item.requirement_id}
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                {item.worker_profile_id}
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                {item.assigned_role ?? "-"}
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                {item.assigned_shift ?? "-"}
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                {item.salary_amount != null
-                  ? formatCurrency(item.salary_amount)
-                  : "-"}
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-700">
-                <StatusBadge value={item.status} />
-              </td>
+        <table className="min-w-full">
+          <thead>
+            <tr className="border-b border-border bg-muted/30">
+              {["ID", "Requirement", "Worker", "Role", "Shift", "Salary", "Status"].map((h) => (
+                <th
+                  key={h}
+                  className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground"
+                >
+                  {h}
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {items.map((item) => (
+              <tr key={item.id} className="transition-colors hover:bg-muted/20">
+                <td className="px-4 py-3 text-sm tabular-nums text-muted-foreground">{item.id}</td>
+                <td className="px-4 py-3 text-sm tabular-nums text-foreground">{item.requirement_id}</td>
+                <td className="px-4 py-3 text-sm tabular-nums text-foreground">{item.worker_profile_id}</td>
+                <td className="px-4 py-3 text-sm text-foreground">{item.assigned_role ?? "—"}</td>
+                <td className="px-4 py-3 text-sm text-foreground">{item.assigned_shift ?? "—"}</td>
+                <td className="px-4 py-3 text-sm tabular-nums text-foreground">
+                  {item.salary_amount != null ? formatCurrency(item.salary_amount) : "—"}
+                </td>
+                <td className="px-4 py-3">
+                  <StatusBadge value={item.status} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       ) : null}
     </ReportTableWrapper>
   );

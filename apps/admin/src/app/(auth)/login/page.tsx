@@ -2,7 +2,6 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Card } from "@/components/ui/card";
 import LoadingState from "@/components/shared/loading-state";
 import { LoginForm } from "@/features/auth";
 import { useAuthStore } from "@/store/auth-store";
@@ -29,18 +28,30 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-background px-4 py-10">
-      <Card className="w-full max-w-md p-8">
-        <div className="mb-8">
-          <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-accent">Admin access</p>
-          <h1 className="mt-3 font-display text-3xl font-semibold tracking-tight text-foreground">Sign in</h1>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Login with your email address and password.
-          </p>
-        </div>
+    <main className="relative flex min-h-screen items-center justify-center bg-background px-8 py-16">
+      <div className="w-full max-w-[380px]">
+        {/* Wordmark */}
+        <p className="mb-8 text-[20px] font-extrabold tracking-[-0.02em] text-brand-900">
+          Annai Illam
+        </p>
+
+        {/* Form header */}
+        <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-accent">
+          Admin Portal
+        </p>
+        <h1 className="mb-1.5 text-[28px] font-extrabold leading-[1.15] tracking-[-0.02em] text-foreground">
+          Welcome back
+        </h1>
+        <p className="mb-8 text-sm text-muted-foreground">
+          Sign in to manage your workforce
+        </p>
 
         <LoginForm />
-      </Card>
+      </div>
+
+      <span className="absolute bottom-5 right-6 select-none font-mono text-[11px] text-muted-foreground">
+        v2.1.0
+      </span>
     </main>
   );
 }

@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useAuthStore } from "@/store/auth-store";
+import FullPageLoader from "@/components/shared/full-page-loader";
 import LoadingState from "@/components/shared/loading-state";
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -26,11 +27,11 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
   }, [accessToken, user, isHydrated, pathname, router]);
 
   if (!isHydrated) {
-    return <LoadingState title="Checking access" description="Preparing the admin workspace." />;
+    return <FullPageLoader />;
   }
 
   if (!accessToken || !user || user.role !== "admin") {
-    return <LoadingState title="Redirecting" description="Please wait…" />;
+    return <FullPageLoader />;
   }
 
   return <>{children}</>;

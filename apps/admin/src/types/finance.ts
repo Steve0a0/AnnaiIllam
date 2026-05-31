@@ -40,7 +40,13 @@ export type AdminClientPaymentRecord = {
 export type AdminClientPaymentsListResponse = {
   success: boolean;
   message: string;
-  data: AdminClientPaymentRecord[];
+  data: {
+    items: AdminClientPaymentRecord[];
+    total: number;
+    page: number;
+    page_size: number;
+    total_pages: number;
+  };
 };
 
 export type UpdateClientPaymentStatusPayload = {
