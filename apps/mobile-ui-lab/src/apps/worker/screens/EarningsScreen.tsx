@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FileDown, ChevronRight } from 'lucide-react-native';
+import { FileDown } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import type { EarningsStackParamList } from '../navigation/types';
 import {
   workerPayrollService,
@@ -91,10 +93,28 @@ export default function EarningsScreen() {
     if (downloadingId) return;
     setDownloadingId(item.id);
     try {
-      const text = await workerPayrollService.getPayslipText(item.id);
-      await Share.share({
-        message: text,
-        title: `Payslip – ${fmtPeriod(item.period_start, item.period_end)}`,
+      const url = workerPayrollService.getPayslipPdfUrl(item.id);
+      const token = await workerPayrollService.getAccessToken();
+      const localUri = `${FileSystem.cacheDirectory}payslip-${item.id}.pdf`;
+
+      const downloadResult = await FileSystem.downloadAsync(url, localUri, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+      if (downloadResult.status !== 200) {
+        throw new Error(`Server returned ${downloadResult.status}`);
+      }
+
+      const canShare = await Sharing.isAvailableAsync();
+      if (!canShare) {
+        Alert.alert('Sharing not available', 'Your device does not support file sharing.');
+        return;
+      }
+
+      await Sharing.shareAsync(downloadResult.uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: 'Save or share your payslip',
+        UTI: 'com.adobe.pdf',
       });
     } catch {
       Alert.alert('Could not download payslip', 'Please try again.');
@@ -169,14 +189,6 @@ export default function EarningsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.brand} />}
       >
         <Text style={s.sectionLabel}>Payment history</Text>
-
-        <Pressable
-          style={({ pressed }) => [s.navLink, pressed && { opacity: 0.7 }]}
-          onPress={() => navigation.navigate('Payments')}
-        >
-          <Text style={s.navLinkText}>Salary Disbursements</Text>
-          <ChevronRight size={16} color={C.brand} />
-        </Pressable>
 
         {items.length === 0 ? (
           <View style={s.emptyCard}>
@@ -407,20 +419,5 @@ const s = StyleSheet.create({
   },
   totalLabel: { color: C.brand, fontSize: 14, fontWeight: '600' },
   totalValue: { color: C.brand, fontSize: 18, fontWeight: '800' },
-
-  // Salary Payments nav link
-  navLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: C.surface,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: C.border,
-    marginBottom: 4,
-  },
-  navLinkText: { fontSize: 14, fontWeight: '600', color: C.brand },
 });
 

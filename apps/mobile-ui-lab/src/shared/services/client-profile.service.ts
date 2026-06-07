@@ -43,6 +43,7 @@ export type ClientProfileCreate = {
   state: string;
   address?: string | null;
   gst_number?: string | null;
+  email?: string | null;
 };
 
 export const clientPhoneService = {

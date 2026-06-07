@@ -233,7 +233,7 @@ class TestAdminClientCreate:
         data = response.json()["data"]
         assert "id" in data
         assert "user_id" in data
-        assert data["phone"] == "9100200300"
+        assert data["phone"] == "+919100200300"
         assert data["contact_name"] == "Test Manager"
         assert data["company_name"] == "Test Corp"
 

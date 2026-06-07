@@ -32,8 +32,18 @@ async def verify_google_token(id_token: str) -> SocialIdentity:
     if "error" in claims:
         raise ValueError(f"Invalid Google token: {claims.get('error_description', 'unknown error')}")
 
-    # Validate audience matches our client ID (skip if not configured)
-    if settings.google_client_id and claims.get("aud") != settings.google_client_id:
+    # Validate audience is one of our registered client IDs (web, iOS, or Android).
+    # The 'aud' claim equals whichever client ID was used on the device.
+    valid_audiences = {
+        cid
+        for cid in (
+            settings.google_client_id,
+            settings.google_ios_client_id,
+            settings.google_android_client_id,
+        )
+        if cid
+    }
+    if valid_audiences and claims.get("aud") not in valid_audiences:
         raise ValueError("Google token audience mismatch")
 
     exp = int(claims.get("exp", 0))

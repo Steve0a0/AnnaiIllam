@@ -7,6 +7,7 @@ def build_quote_entity(payload, user_id: int) -> Quote:
         requirement_id=payload.requirement_id,
         quoted_amount=payload.quoted_amount,
         rate_per_worker=payload.rate_per_worker,
+        worker_daily_rate=getattr(payload, 'worker_daily_rate', None),
         total_worker_days=payload.total_worker_days,
         advance_amount=payload.advance_amount,
         payment_model=payload.payment_model,

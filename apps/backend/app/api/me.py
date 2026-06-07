@@ -8,7 +8,7 @@ from app.core.roles import UserRole
 from app.core.security import hash_password, verify_password
 from app.db.deps import get_db
 from app.models.user import User
-from app.repositories.profile_repository import get_client_profile_by_user_id
+from app.repositories.profile_repository import get_admin_profile_by_user_id, get_client_profile_by_user_id
 from app.utils.audit import audit_event
 from app.utils.response import success_response
 
@@ -31,9 +31,15 @@ def me(current_user: User = Depends(get_current_user), db: Session = Depends(get
         "is_active": current_user.is_active,
     }
 
+    if current_user.role == UserRole.ADMIN.value:
+        admin_profile = get_admin_profile_by_user_id(db, current_user.id)
+        payload["permission_group"] = admin_profile.permission_group if admin_profile else None
+
     if current_user.role == UserRole.CLIENT.value:
         profile = get_client_profile_by_user_id(db, current_user.id)
         payload["is_profile_complete"] = profile is not None
+        if not payload["name"] and profile:
+            payload["name"] = profile.contact_name
 
     return success_response("Current user fetched successfully", payload)
 

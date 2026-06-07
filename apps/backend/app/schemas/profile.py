@@ -19,6 +19,7 @@ class ClientProfileCreateSchema(BaseModel):
     state: str = Field(min_length=2, max_length=100)
     address: str | None = Field(default=None, max_length=1000)
     gst_number: str | None = Field(default=None, max_length=50)
+    email: str | None = Field(default=None, max_length=255)
 
 
 class ClientProfileUpdateSchema(BaseModel):

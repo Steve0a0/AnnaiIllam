@@ -14,6 +14,7 @@ from app.services.otp_service import issue_login_otp
 from app.utils.audit import audit_event
 from app.utils.response import success_response
 from app.utils.time import utcnow
+from app.utils.validators import normalize_phone
 
 router = APIRouter(prefix="/client/phone", tags=["Client Phone"])
 
@@ -30,21 +31,26 @@ def request_phone_link_otp(
             detail="A phone number is already linked. Contact support to change it.",
         )
 
-    existing = get_user_by_phone(db, payload.phone)
+    try:
+        phone = normalize_phone(payload.phone)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid phone number format")
+
+    existing = get_user_by_phone(db, phone)
     if existing and existing.id != current_user.id:
         raise HTTPException(
             status_code=409,
             detail="This phone number is already registered to another account.",
         )
 
-    check_rate_limit(f"otp_request:{payload.phone}", limit=5, window_seconds=300)
+    check_rate_limit(f"otp_request:{phone}", limit=5, window_seconds=300)
 
-    otp_code = issue_login_otp(db=db, phone=payload.phone)
+    otp_code = issue_login_otp(db=db, phone=phone)
     db.commit()
 
-    audit_event("phone_link_otp_requested", {"user_id": current_user.id, "phone": payload.phone})
+    audit_event("phone_link_otp_requested", {"user_id": current_user.id, "phone": phone})
 
-    response: dict = {"phone": payload.phone}
+    response: dict = {"phone": phone}
     if settings.is_local:
         response["otp"] = otp_code
 
@@ -63,16 +69,21 @@ def verify_phone_link_otp(
             detail="A phone number is already linked to this account.",
         )
 
-    existing = get_user_by_phone(db, payload.phone)
+    try:
+        phone = normalize_phone(payload.phone)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid phone number format")
+
+    existing = get_user_by_phone(db, phone)
     if existing and existing.id != current_user.id:
         raise HTTPException(
             status_code=409,
             detail="This phone number is already registered to another account.",
         )
 
-    check_rate_limit(f"otp_verify:{payload.phone}", limit=10, window_seconds=300)
+    check_rate_limit(f"otp_verify:{phone}", limit=10, window_seconds=300)
 
-    otp_record = get_latest_active_otp(db, payload.phone)
+    otp_record = get_latest_active_otp(db, phone)
     if not otp_record:
         raise HTTPException(status_code=400, detail="OTP not found. Request a new code.")
 
@@ -92,11 +103,11 @@ def verify_phone_link_otp(
         raise HTTPException(status_code=400, detail="Invalid OTP.")
 
     otp_record.is_used = True
-    current_user.phone = payload.phone
+    current_user.phone = phone
     current_user.is_phone_verified = True
 
     db.commit()
 
-    audit_event("phone_linked", {"user_id": current_user.id, "phone": payload.phone})
+    audit_event("phone_linked", {"user_id": current_user.id, "phone": phone})
 
-    return success_response("Phone number linked successfully", {"phone": payload.phone})
+    return success_response("Phone number linked successfully", {"phone": phone})

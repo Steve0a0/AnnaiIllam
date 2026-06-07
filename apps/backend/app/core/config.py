@@ -32,7 +32,9 @@ class Settings(BaseSettings):
     otp_length: int = 6
     otp_max_attempts: int = 5
 
-    google_client_id: str = ""
+    google_client_id: str = ""          # Web client ID
+    google_ios_client_id: str = ""       # iOS client ID
+    google_android_client_id: str = ""   # Android client ID
     apple_app_bundle_id: str = ""
 
     backend_cors_origins: str = ""
@@ -85,6 +87,19 @@ class Settings(BaseSettings):
     # Unclosed check-in alerting — alert admins when a worker has been
     # checked in for this many hours without checking out. Default 10 hours.
     max_shift_hours: int = 10
+
+    # Resend — transactional email (invoices, notifications).
+    # Obtain API key from https://resend.com/api-keys
+    # Leave empty to disable email sending (local dev).
+    resend_api_key: str = ""
+    resend_from_email: str = ""
+    resend_from_name: str = "Annai Illam"
+
+    # Gmail SMTP — alternative to Resend when you don't have a verified domain.
+    # Use an App Password (not your Gmail login password).
+    # Generate at: https://myaccount.google.com/apppasswords (2FA must be on)
+    gmail_user: str = ""
+    gmail_app_password: str = ""
 
     # Sentry error monitoring. Leave SENTRY_DSN empty to disable.
     sentry_dsn: str = ""

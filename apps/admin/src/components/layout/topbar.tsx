@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, LogOut, Search } from "lucide-react";
+import { AlertTriangle, Bell, CalendarOff, CreditCard, LogOut, Search } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -17,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { authStorage } from "@/lib/auth-storage";
 import { useAuthStore } from "@/store/auth-store";
 import { authService } from "@/services/auth.service";
+import { useDashboardAlerts } from "@/features/dashboard/use-dashboard-alerts";
 
 const pageLabels: Record<string, string> = {
   "/dashboard":    "Dashboard",
@@ -45,6 +47,28 @@ export default function Topbar() {
   const user = useAuthStore((state) => state.user);
   const clearAuth = useAuthStore((state) => state.clearAuth);
   const refreshToken = useAuthStore((state) => state.refreshToken);
+  const { data: alertsResp } = useDashboardAlerts();
+  const alerts = alertsResp?.data;
+  const totalAlerts =
+    (alerts?.open_complaints?.length ?? 0) +
+    (alerts?.overdue_complaints?.length ?? 0) +
+    (alerts?.missing_attendance?.length ?? 0) +
+    (alerts?.unpaid_invoices?.length ?? 0);
+
+  // Badge only shows count that arrived AFTER the dropdown was last opened.
+  // Persisted to localStorage so refresh doesn't bring the badge back.
+  const [seenCount, setSeenCount] = useState<number>(() => {
+    if (typeof window === "undefined") return 0;
+    return Number(localStorage.getItem("admin_alerts_seen") ?? 0);
+  });
+  const badgeCount = Math.max(0, totalAlerts - seenCount);
+
+  function handleBellOpenChange(open: boolean) {
+    if (open) {
+      setSeenCount(totalAlerts);
+      localStorage.setItem("admin_alerts_seen", String(totalAlerts));
+    }
+  }
 
   const segment = "/" + (pathname.split("/")[1] ?? "");
   const pageLabel = pageLabels[segment] ?? "Workspace";
@@ -83,13 +107,97 @@ export default function Topbar() {
           />
         </div>
 
-        <button
-          aria-label="View notifications"
-          className="relative flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <Bell className="h-4 w-4" />
-          <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-destructive" />
-        </button>
+        <DropdownMenu onOpenChange={handleBellOpenChange}>
+          <DropdownMenuTrigger asChild>
+            <button
+              aria-label="View notifications"
+              className="relative flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Bell className="h-4 w-4" />
+              {badgeCount > 0 && (
+                <span className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[9px] font-bold leading-none text-white">
+                  {badgeCount > 99 ? "99+" : badgeCount}
+                </span>
+              )}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-80">
+            <DropdownMenuLabel className="flex items-center justify-between">
+              <span>Alerts</span>
+              {totalAlerts > 0 && (
+                <span className="rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-bold text-white">
+                  {totalAlerts}
+                </span>
+              )}
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {totalAlerts === 0 ? (
+              <div className="px-3 py-6 text-center">
+                <p className="text-sm font-medium text-foreground">All clear</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">No active alerts right now.</p>
+              </div>
+            ) : (
+              <>
+                {(alerts?.open_complaints?.length ?? 0) > 0 && (
+                  <DropdownMenuItem
+                    className="cursor-pointer gap-3"
+                    onClick={() => router.push("/complaints")}
+                  >
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">
+                        {alerts!.open_complaints.length} new complaint{alerts!.open_complaints.length !== 1 ? "s" : ""}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Awaiting admin review</p>
+                    </div>
+                  </DropdownMenuItem>
+                )}
+                {(alerts?.overdue_complaints?.length ?? 0) > 0 && (
+                  <DropdownMenuItem
+                    className="cursor-pointer gap-3"
+                    onClick={() => router.push("/complaints")}
+                  >
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">
+                        {alerts!.overdue_complaints.length} overdue complaint{alerts!.overdue_complaints.length !== 1 ? "s" : ""}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Past SLA — needs resolution</p>
+                    </div>
+                  </DropdownMenuItem>
+                )}
+                {(alerts?.missing_attendance?.length ?? 0) > 0 && (
+                  <DropdownMenuItem
+                    className="cursor-pointer gap-3"
+                    onClick={() => router.push("/attendance")}
+                  >
+                    <CalendarOff className="h-4 w-4 shrink-0 text-amber-500" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">
+                        {alerts!.missing_attendance.length} worker{alerts!.missing_attendance.length !== 1 ? "s" : ""} not checked in
+                      </p>
+                      <p className="text-xs text-muted-foreground">Today&apos;s attendance missing</p>
+                    </div>
+                  </DropdownMenuItem>
+                )}
+                {(alerts?.unpaid_invoices?.length ?? 0) > 0 && (
+                  <DropdownMenuItem
+                    className="cursor-pointer gap-3"
+                    onClick={() => router.push("/requirements")}
+                  >
+                    <CreditCard className="h-4 w-4 shrink-0 text-blue-500" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">
+                        {alerts!.unpaid_invoices.length} unpaid invoice{alerts!.unpaid_invoices.length !== 1 ? "s" : ""}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Pending client payment</p>
+                    </div>
+                  </DropdownMenuItem>
+                )}
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

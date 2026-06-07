@@ -71,7 +71,7 @@ const initialForm: FormState = {
   state: 'Tamil Nadu',
   site_latitude: null,
   site_longitude: null,
-  number_of_workers: '10',
+  number_of_workers: '1',
   skills: [],
   start_date: toDateInput(addDays(new Date(), 1)),
   duration_days: '7',
@@ -150,7 +150,7 @@ export default function CreateRequestScreen() {
       style={[clientStyles.root, { paddingTop: insets.top }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView contentContainerStyle={clientStyles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={clientStyles.content} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
         <ScreenHeader title="Request workers" subtitle={`Step ${step + 1} of 4`} onBack={() => navigation.goBack()} />
 
         <View style={styles.progressTrack}>
@@ -232,6 +232,7 @@ function StepJob({ form, update }: StepProps) {
           minLength={3}
           enablePoweredByContainer={false}
           keyboardShouldPersistTaps="handled"
+          disableScroll
           textInputProps={{
             placeholderTextColor: C.muted,
             onChangeText: (v: string) => {
@@ -323,12 +324,34 @@ function StepWorkers({ form, update }: StepProps) {
 }
 
 function StepShift({ form, update }: StepProps) {
+  const isCustomDuration = !DURATIONS.includes(form.duration_days);
+  const durationSelected = isCustomDuration ? 'Custom' : `${form.duration_days} days`;
   return (
     <View style={styles.formGap}>
       <Text style={styles.stepTitle}>Shift and dates</Text>
       <DateQuickPick value={form.start_date} onChange={(v) => update('start_date', v)} />
       <DatePickerField value={form.start_date} onChange={(v) => update('start_date', v)} />
-      <ChipGroup label="Duration" options={DURATIONS.map((item) => `${item} days`)} selected={`${form.duration_days} days`} onSelect={(v) => update('duration_days', v.split(' ')[0])} />
+      <ChipGroup
+        label="Duration"
+        options={[...DURATIONS.map((d) => `${d} days`), 'Custom']}
+        selected={durationSelected}
+        onSelect={(v) => {
+          if (v === 'Custom') {
+            update('duration_days', '');
+          } else {
+            update('duration_days', v.split(' ')[0]);
+          }
+        }}
+      />
+      {isCustomDuration ? (
+        <Field
+          label="Number of days"
+          value={form.duration_days}
+          onChangeText={(v) => update('duration_days', onlyDigits(v))}
+          placeholder="e.g. 2"
+          keyboardType="number-pad"
+        />
+      ) : null}
       <ChipGroup label="Shift timing" options={SHIFT_OPTIONS} selected={form.shift_details} onSelect={(v) => update('shift_details', v)} />
       {form.shift_details === 'Custom' ? (
         <Field label="Custom shift timing" value={form.custom_shift} onChangeText={(v) => update('custom_shift', v)} placeholder="Example: 07:30-16:30" />

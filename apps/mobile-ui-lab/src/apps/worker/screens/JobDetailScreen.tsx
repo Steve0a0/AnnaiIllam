@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Platform } from 'react-native';
 import {
   BriefcaseBusiness,
   CalendarDays,
@@ -551,7 +551,8 @@ export default function JobDetailScreen() {
             </YStack>
 
             {/* Map strip — location context at a glance */}
-            <YStack
+            <Button
+              unstyled
               marginHorizontal={16}
               marginTop={16}
               borderRadius={16}
@@ -560,6 +561,10 @@ export default function JobDetailScreen() {
               backgroundColor="#D1E8D0"
               borderWidth={1}
               borderColor={C.neutral200}
+              pressStyle={{ opacity: 0.82 }}
+              onPress={() => openMapsWithAddress(`${req.work_location}, ${req.city}, ${req.state}`)}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${req.work_location} in Maps`}
             >
               {/* Grid lines to suggest a map */}
               <YStack flex={1} position="relative">
@@ -616,8 +621,9 @@ export default function JobDetailScreen() {
                 <Text fontSize={11} color="rgba(255,255,255,0.6)">
                   {req.city}, {req.state}
                 </Text>
+                <ExternalLinkIcon />
               </XStack>
-            </YStack>
+            </Button>
 
             {/* Info section */}
             <YStack marginHorizontal={16} marginTop={20} gap={12}>
@@ -777,14 +783,62 @@ function SectionLabel({ label }: { label: string }) {
 
 function formatTime(value: string | null | undefined) {
   if (!value) return '—';
-  return new Intl.DateTimeFormat('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).format(
-    new Date(`1970-01-01T${value}`),
-  );
+  // Backend returns full ISO timestamps (e.g. "2026-06-05T10:30:00").
+  // Pass directly to Date — do NOT prepend "1970-01-01T".
+  const d = new Date(value.replace(' ', 'T'));
+  if (isNaN(d.getTime())) return '—';
+  return new Intl.DateTimeFormat('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).format(d);
 }
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).format(
-    new Date(value),
+function formatDate(value: string | null | undefined) {
+  if (!value) return '—';
+  const d = new Date(value.replace(' ', 'T'));
+  if (isNaN(d.getTime())) return '—';
+  return new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).format(d);
+}
+
+function openMapsWithAddress(address: string) {
+  const encoded = encodeURIComponent(address);
+  const appleUrl = `maps:0,0?q=${encoded}`;
+  const googleUrl = `https://www.google.com/maps/search/?api=1&query=${encoded}`;
+
+  if (Platform.OS === 'ios') {
+    Alert.alert('Open in Maps', address, [
+      {
+        text: 'Apple Maps',
+        onPress: () =>
+          Linking.openURL(appleUrl).catch(() =>
+            Alert.alert('Could not open Apple Maps'),
+          ),
+      },
+      {
+        text: 'Google Maps',
+        onPress: () =>
+          Linking.openURL(googleUrl).catch(() =>
+            Alert.alert('Could not open Google Maps'),
+          ),
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  } else {
+    Linking.openURL(googleUrl).catch(() =>
+      Alert.alert('Could not open Maps', 'No maps app found on this device.'),
+    );
+  }
+}
+
+function ExternalLinkIcon() {
+  return (
+    <View
+      width={20}
+      height={20}
+      borderRadius={10}
+      backgroundColor="rgba(255,255,255,0.18)"
+      alignItems="center"
+      justifyContent="center"
+    >
+      <MapPin size={11} color="#FFFFFF" />
+    </View>
   );
 }
 

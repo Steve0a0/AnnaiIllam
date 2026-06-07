@@ -237,26 +237,26 @@ export default function CreateAssignmentForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       {replacementHint && (
-        <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <RefreshCw className="size-4 shrink-0 text-amber-600" />
-          <p className="text-sm text-amber-800">
+        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <RefreshCw className="mt-0.5 size-4 shrink-0 text-amber-600" />
+          <p className="text-[14px] text-amber-800">
             <span className="font-semibold">Replacement mode</span> — dates and role pre-filled from the declined slot. Select a new worker below.
           </p>
         </div>
       )}
+
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.8fr)]">
+        {/* Worker picker */}
         <section className="space-y-4">
-          <div className="rounded-xl border border-border bg-[#FAFAF9] p-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="rounded-xl border border-[oklch(0.90_0.003_145)] bg-[oklch(0.97_0.008_145)] p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="text-sm font-semibold text-foreground">
-                  Choose workers
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Ready workers can be assigned now. Blocked workers show the exact reason they are unavailable.
+                <p className="text-[14px] font-semibold text-[oklch(0.20_0.006_145)]">Choose workers</p>
+                <p className="mt-1 text-[13px] text-[oklch(0.44_0.005_145)]">
+                  Ready workers can be selected. Blocked workers show what needs fixing.
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex shrink-0 items-center gap-2">
                 <Button
                   type="button"
                   variant="secondary"
@@ -277,262 +277,252 @@ export default function CreateAssignmentForm({
                 </Button>
               </div>
             </div>
-            <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-              <MatchCount label="ready" value={assignableMatches.length} tone="success" />
-              <MatchCount label="blocked" value={blockedMatches.length} tone="warning" />
-              <MatchCount label="selected" value={selectedWorkerIds.length} tone="neutral" />
+            <div className="mt-3 flex items-center gap-5 border-t border-[oklch(0.90_0.003_145)] pt-3">
+              <Stat dot="bg-[oklch(0.42_0.115_145)]" value={assignableMatches.length} label="ready" />
+              <Stat dot="bg-[#F59E0B]" value={blockedMatches.length} label="blocked" />
+              <Stat dot="bg-[oklch(0.62_0.004_145)]" value={selectedWorkerIds.length} label="selected" />
             </div>
           </div>
 
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[oklch(0.62_0.004_145)]" />
             <input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(e) => setQuery(e.target.value)}
               placeholder="Search by name, skill, city, or reason"
-              className="h-11 w-full rounded-lg border border-input bg-white pl-9 pr-3 text-sm text-foreground shadow-sm outline-none transition focus:ring-2 focus:ring-ring"
+              className="h-11 w-full rounded-xl border border-[oklch(0.90_0.003_145)] bg-white pl-9 pr-4 text-[14px] text-[oklch(0.20_0.006_145)] outline-none transition placeholder:text-[oklch(0.62_0.004_145)] focus:border-[oklch(0.42_0.115_145)] focus:ring-2 focus:ring-[oklch(0.42_0.115_145)]/20"
             />
           </div>
 
           {matchesLoading ? (
-            <div className="rounded-xl border border-dashed border-border bg-white p-5 text-sm text-muted-foreground">
+            <div className="rounded-xl border border-dashed border-[oklch(0.90_0.003_145)] bg-white p-6 text-center text-[13px] text-[oklch(0.48_0.005_145)]">
               Loading worker matches...
             </div>
           ) : null}
 
-          {!matchesLoading && matches.length > 0 && assignableMatches.length === 0 ? (
-            <div className="rounded-xl border-l-4 border-l-[#B45309] border-y border-r border-[#FEF3C7] bg-[#FFFBEB] px-4 py-3 text-sm text-[#B45309]">
-              No workers are ready for this requirement yet. Use the blocked list below to see what needs fixing.
-            </div>
+          {!matchesLoading && matches.length === 0 ? (
+            <EmptyState
+              title="No worker profiles yet"
+              detail="Approve a worker profile first, then return here to assign."
+            />
           ) : null}
 
-          {!matchesLoading && matches.length === 0 ? (
-            <div className="rounded-xl border-l-4 border-l-[#B45309] border-y border-r border-[#FEF3C7] bg-[#FFFBEB] px-4 py-3 text-sm text-[#B45309]">
-              No worker profiles are available yet. Approve a worker profile first, then return here.
-            </div>
+          {!matchesLoading && matches.length > 0 && assignableMatches.length === 0 ? (
+            <EmptyState
+              title="No workers ready for this requirement"
+              detail="Check the blocked list below to see what needs fixing."
+            />
           ) : null}
 
           {assignableMatches.length ? (
-            <WorkerGroup
-              title="Ready to assign"
-              description="Approved, available workers who match the requested date and shift."
-              count={assignableMatches.length}
-              countLabel="ready"
-            >
+            <WorkerGroup title="Ready to assign" count={assignableMatches.length} countTone="ready">
               {visibleReadyToAssignMatches.length ? (
-                <div className="grid gap-3 md:grid-cols-2">
-                  {visibleReadyToAssignMatches.map((worker) => (
-                    <WorkerCard
-                      key={worker.worker_profile_id}
-                      worker={worker}
-                      selected={selectedWorkerIds.includes(
-                        String(worker.worker_profile_id),
-                      )}
-                      onSelect={() => toggleWorker(worker.worker_profile_id)}
-                      badge={worker.has_interest ? "Interested" : undefined}
-                    />
-                  ))}
-                </div>
+                visibleReadyToAssignMatches.map((worker) => (
+                  <WorkerCard
+                    key={worker.worker_profile_id}
+                    worker={worker}
+                    selected={selectedWorkerIds.includes(String(worker.worker_profile_id))}
+                    onSelect={() => toggleWorker(worker.worker_profile_id)}
+                    badge={worker.has_interest ? "Interested" : undefined}
+                  />
+                ))
               ) : (
-                <EmptyGroup>No ready workers match this search.</EmptyGroup>
+                <div className="px-4 py-4 text-[13px] text-[oklch(0.48_0.005_145)]">No ready workers match this search.</div>
               )}
             </WorkerGroup>
           ) : null}
 
           {blockedMatches.length ? (
-            <WorkerGroup
-              title="Blocked workers"
-              description="These workers cannot be assigned until the reason is resolved."
-              count={blockedMatches.length}
-              countLabel="blocked"
-            >
+            <WorkerGroup title="Blocked" count={blockedMatches.length} countTone="blocked">
               {visibleBlockedMatches.length ? (
-                <div className="grid gap-3 md:grid-cols-2">
-                  {visibleBlockedMatches.slice(0, 8).map((worker) => (
-                    <BlockedWorkerCard
-                      key={worker.worker_profile_id}
-                      worker={worker}
-                    />
-                  ))}
-                </div>
+                visibleBlockedMatches.slice(0, 8).map((worker) => (
+                  <BlockedWorkerCard key={worker.worker_profile_id} worker={worker} />
+                ))
               ) : (
-                <EmptyGroup>No blocked workers match this search.</EmptyGroup>
+                <div className="px-4 py-4 text-[13px] text-[oklch(0.48_0.005_145)]">No blocked workers match this search.</div>
               )}
             </WorkerGroup>
           ) : null}
         </section>
 
-        <aside className="space-y-4 lg:sticky lg:top-0 lg:self-start">
-          <section className="rounded-xl border border-border bg-white p-4 shadow-sm">
-            <div className="flex items-start justify-between gap-4">
+        {/* Assignment details sidebar */}
+        <aside className="lg:sticky lg:top-0 lg:self-start">
+          <div className="rounded-xl border border-[oklch(0.90_0.003_145)] bg-white">
+            <div className="flex items-center justify-between border-b border-[oklch(0.90_0.003_145)] px-5 py-4">
               <div>
-                <p className="text-sm font-semibold text-foreground">
-                  Assignment details
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  These settings apply to every selected worker.
-                </p>
+                <p className="text-[14px] font-semibold text-[oklch(0.20_0.006_145)]">Assignment details</p>
+                <p className="mt-0.5 text-[13px] text-[oklch(0.44_0.005_145)]">Applied to every selected worker</p>
               </div>
-              <span className="rounded-full bg-[#EDFAF3] px-3 py-1 text-xs font-semibold text-[#1A6640]">
-                {selectedWorkerIds.length} selected
-              </span>
+              {selectedWorkerIds.length > 0 && (
+                <span className="rounded-full bg-[oklch(0.91_0.026_145)] px-3 py-1 text-[12px] font-semibold text-[oklch(0.34_0.094_145)]">
+                  {selectedWorkerIds.length} selected
+                </span>
+              )}
             </div>
 
-            {selectedWorkers.length ? (
-              <div className="mt-4 flex flex-wrap gap-2">
-                {selectedWorkers.map((worker) => (
-                  <button
-                    key={worker.worker_profile_id}
-                    type="button"
-                    onClick={() => toggleWorker(worker.worker_profile_id)}
-                    className="inline-flex items-center gap-1 rounded-full border border-border bg-[#FAFAF9] px-2.5 py-1 text-xs font-medium text-foreground"
-                  >
-                    {worker.full_name}
-                    <X className="size-3" />
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="mt-4 rounded-lg border border-dashed border-border bg-[#FAFAF9] p-3 text-xs text-muted-foreground">
-                Select workers from the list to enable assignment.
-              </div>
-            )}
-
-            <div className="mt-5 space-y-4">
-              <Field label="Assigned role">
-                <select
-                  className="h-11 w-full rounded-lg border border-input bg-white px-3 text-sm"
-                  value={assignedRole}
-                  onChange={(e) => setAssignedRole(e.target.value)}
-                >
-                  {roleOptions.map((role) => (
-                    <option key={role} value={role}>
-                      {role}
-                    </option>
+            {/* Selected workers */}
+            <div className="px-5 pt-4 pb-3">
+              {selectedWorkers.length ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedWorkers.map((worker) => (
+                    <button
+                      key={worker.worker_profile_id}
+                      type="button"
+                      onClick={() => toggleWorker(worker.worker_profile_id)}
+                      className="inline-flex items-center gap-1 rounded-full border border-[oklch(0.90_0.003_145)] bg-[oklch(0.97_0.008_145)] px-2.5 py-1 text-[12px] font-medium text-[oklch(0.38_0.005_145)] transition hover:border-[oklch(0.42_0.115_145)] hover:text-[oklch(0.20_0.006_145)]"
+                    >
+                      {worker.full_name}
+                      <X className="size-3" />
+                    </button>
                   ))}
-                </select>
-                {assignedRole === "Other" ? (
-                  <input
-                    className="mt-2 h-11 w-full rounded-lg border border-input bg-white px-3 text-sm"
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-[oklch(0.90_0.003_145)] bg-[oklch(0.97_0.008_145)] px-4 py-3.5 text-center text-[13px] text-[oklch(0.48_0.005_145)]">
+                  Select workers from the list to begin
+                </div>
+              )}
+            </div>
+
+            {/* Role & shift */}
+            <div className="space-y-3 border-t border-[oklch(0.90_0.003_145)] px-5 py-4">
+              <Field label="Role">
+                <FormSelect value={assignedRole} onChange={(e) => setAssignedRole(e.target.value)}>
+                  {roleOptions.map((role) => (
+                    <option key={role} value={role}>{role}</option>
+                  ))}
+                </FormSelect>
+                {assignedRole === "Other" && (
+                  <FormInput
+                    className="mt-2"
                     value={customRole}
                     onChange={(e) => setCustomRole(e.target.value)}
                     placeholder="Enter custom role"
                   />
-                ) : null}
+                )}
               </Field>
-
-              <Field label="Assigned shift">
-                <select
-                  className="h-11 w-full rounded-lg border border-input bg-white px-3 text-sm"
-                  value={assignedShift}
-                  onChange={(e) => setAssignedShift(e.target.value)}
-                >
+              <Field label="Shift">
+                <FormSelect value={assignedShift} onChange={(e) => setAssignedShift(e.target.value)}>
                   {shiftOptions.map((shift) => (
-                    <option key={shift} value={shift}>
-                      {shift}
-                    </option>
+                    <option key={shift} value={shift}>{shift}</option>
                   ))}
-                </select>
-                {assignedShift === "Other" ? (
-                  <input
-                    className="mt-2 h-11 w-full rounded-lg border border-input bg-white px-3 text-sm"
+                </FormSelect>
+                {assignedShift === "Other" && (
+                  <FormInput
+                    className="mt-2"
                     value={customShift}
                     onChange={(e) => setCustomShift(e.target.value)}
                     placeholder="Enter custom shift"
                   />
-                ) : null}
+                )}
               </Field>
+            </div>
 
-              <Field label="Worker daily rate (used for payroll)">
-                <select
-                  className="h-11 w-full rounded-lg border border-input bg-white px-3 text-sm"
-                  value={salaryMode}
-                  onChange={(e) => setSalaryMode(e.target.value)}
-                >
+            {/* Pay */}
+            <div className="border-t border-[oklch(0.90_0.003_145)] px-5 py-4">
+              <Field label="Daily rate">
+                <FormSelect value={salaryMode} onChange={(e) => setSalaryMode(e.target.value)}>
                   {salaryOptions.map((option) => (
-                    <option key={option.value || "none"} value={option.value}>
-                      {option.label}
-                    </option>
+                    <option key={option.value || "none"} value={option.value}>{option.label}</option>
                   ))}
                   <option value="custom">Custom amount</option>
-                </select>
-                {salaryMode === "custom" ? (
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    className="h-11 w-full rounded-lg border border-input bg-white px-3 text-sm mt-2"
-                    value={salaryAmount}
-                    onChange={(e) => setSalaryAmount(e.target.value)}
-                    placeholder="Daily rate in rupees"
-                  />
-                ) : null}
-                <p className="mt-2 text-xs text-muted-foreground">
+                </FormSelect>
+                {salaryMode === "custom" && (
+                  <div className="relative mt-2">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-mono text-[13px] text-[oklch(0.48_0.005_145)]">₹</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      className="h-11 w-full rounded-xl border border-[oklch(0.90_0.003_145)] bg-white py-0 pl-8 pr-3 font-mono text-[14px] text-[oklch(0.20_0.006_145)] outline-none transition focus:border-[oklch(0.42_0.115_145)] focus:ring-2 focus:ring-[oklch(0.42_0.115_145)]/20"
+                      value={salaryAmount}
+                      onChange={(e) => setSalaryAmount(e.target.value)}
+                      placeholder="0"
+                    />
+                  </div>
+                )}
+                <p className="mt-1.5 text-[12px] text-[oklch(0.48_0.005_145)]">
                   Per day — payroll calculates gross as daily rate × days worked.
                 </p>
               </Field>
+            </div>
 
-              <Field label="Notes">
-                <textarea
-                  className="min-h-24 w-full rounded-lg border border-input bg-white px-3 py-2 text-sm"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Add assignment notes"
-                />
-              </Field>
-
+            {/* Work period */}
+            <div className="border-t border-[oklch(0.90_0.003_145)] px-5 py-4">
+              <p className="mb-3 text-[13px] font-medium text-[oklch(0.38_0.005_145)]">Work period</p>
               <div className="grid grid-cols-2 gap-3">
-                <Field label="Worker starts">
+                <div>
+                  <p className="mb-1.5 text-[12px] text-[oklch(0.48_0.005_145)]">Starts</p>
                   <input
                     type="date"
-                    className="h-11 w-full rounded-lg border border-input bg-white px-3 text-sm"
+                    className="h-11 w-full rounded-xl border border-[oklch(0.90_0.003_145)] bg-white px-3 font-mono text-[13px] text-[oklch(0.20_0.006_145)] outline-none transition focus:border-[oklch(0.42_0.115_145)] focus:ring-2 focus:ring-[oklch(0.42_0.115_145)]/20"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
                     min={reqMinDate}
                     max={reqMaxDate}
                   />
-                </Field>
-                <Field label="Worker ends">
+                </div>
+                <div>
+                  <p className="mb-1.5 text-[12px] text-[oklch(0.48_0.005_145)]">Ends</p>
                   <input
                     type="date"
-                    className="h-11 w-full rounded-lg border border-input bg-white px-3 text-sm"
+                    className="h-11 w-full rounded-xl border border-[oklch(0.90_0.003_145)] bg-white px-3 font-mono text-[13px] text-[oklch(0.20_0.006_145)] outline-none transition focus:border-[oklch(0.42_0.115_145)] focus:ring-2 focus:ring-[oklch(0.42_0.115_145)]/20"
                     value={endDate}
                     onChange={(e) => setEndDate(e.target.value)}
                     min={startDate || reqMinDate}
                     max={reqMaxDate}
                   />
-                </Field>
+                </div>
               </div>
               {reqMinDate && reqMaxDate ? (
-                <p className="text-xs text-muted-foreground">
-                  Job window: {reqMinDate} → {reqMaxDate}. Dates outside this range will be rejected.
+                <p className="mt-2 font-mono text-[12px] text-[oklch(0.48_0.005_145)]">
+                  Job window: {reqMinDate} → {reqMaxDate}
                 </p>
               ) : (
-              <p className="text-xs text-muted-foreground">
-                Set the specific days this worker covers. Check-in is blocked outside this window.
-              </p>
+                <p className="mt-2 text-[12px] text-[oklch(0.48_0.005_145)]">
+                  Check-in is blocked outside this window.
+                </p>
               )}
             </div>
 
-            {message ? (
-              <div className="mt-4 rounded-lg bg-[#FAFAF9] px-3 py-2 text-sm text-foreground">
-                {message}
-              </div>
-            ) : null}
+            {/* Notes */}
+            <div className="border-t border-[oklch(0.90_0.003_145)] px-5 py-4">
+              <Field label="Notes">
+                <textarea
+                  className="min-h-[88px] w-full resize-none rounded-xl border border-[oklch(0.90_0.003_145)] bg-white px-3 py-2.5 text-[14px] text-[oklch(0.20_0.006_145)] outline-none transition placeholder:text-[oklch(0.62_0.004_145)] focus:border-[oklch(0.42_0.115_145)] focus:ring-2 focus:ring-[oklch(0.42_0.115_145)]/20"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Add notes for this assignment"
+                />
+              </Field>
+            </div>
 
-            <Button
-              type="submit"
-              disabled={loading || !selectedWorkerIds.length}
-              variant="accent"
-              className="mt-5 w-full"
-            >
-              {loading
-                ? "Assigning..."
-                : selectedWorkerIds.length > 1
-                  ? `Assign ${selectedWorkerIds.length} Workers`
-                  : "Assign Worker"}
-            </Button>
-          </section>
+            {/* Footer: message + submit */}
+            <div className="border-t border-[oklch(0.90_0.003_145)] px-5 py-4">
+              {message && (
+                <div
+                  className={`mb-3 rounded-xl px-3.5 py-2.5 text-[13px] ${
+                    message.toLowerCase().includes("successfully")
+                      ? "bg-[#F0FDF4] text-[#15803D]"
+                      : "bg-[#FFF1F2] text-[#B91C1C]"
+                  }`}
+                >
+                  {message}
+                </div>
+              )}
+              <Button
+                type="submit"
+                disabled={loading || !selectedWorkerIds.length}
+                variant="accent"
+                className="w-full"
+              >
+                {loading
+                  ? "Assigning..."
+                  : selectedWorkerIds.length > 1
+                    ? `Assign ${selectedWorkerIds.length} Workers`
+                    : "Assign Worker"}
+              </Button>
+            </div>
+          </div>
         </aside>
       </div>
     </form>
@@ -541,60 +531,64 @@ export default function CreateAssignmentForm({
 
 function WorkerGroup({
   title,
-  description,
   count,
-  countLabel,
+  countTone,
   children,
 }: {
   title: string;
-  description: string;
   count: number;
-  countLabel: string;
+  countTone: "ready" | "blocked";
   children: ReactNode;
 }) {
+  const pillClass =
+    countTone === "ready"
+      ? "bg-[oklch(0.91_0.026_145)] text-[oklch(0.34_0.094_145)]"
+      : "bg-[#FEF3C7] text-[#B45309]";
+
   return (
-    <section className="rounded-xl border border-border bg-white p-4 shadow-sm">
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-foreground">{title}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
-        </div>
-        <span className="rounded-full bg-[#EDFAF3] px-3 py-1 text-xs font-semibold text-[#1A6640]">
-          {count} {countLabel}
-        </span>
+    <div className="overflow-hidden rounded-xl border border-[oklch(0.90_0.003_145)]">
+      <div className="flex items-center gap-2 bg-[oklch(0.97_0.008_145)] px-4 py-2.5">
+        <p className="text-[13px] font-semibold text-[oklch(0.20_0.006_145)]">{title}</p>
+        <span className={`rounded-full px-2 py-0.5 text-[12px] font-medium ${pillClass}`}>{count}</span>
       </div>
-      {children}
-    </section>
+      <div className="divide-y divide-[oklch(0.95_0.013_145)] bg-white">
+        {children}
+      </div>
+    </div>
   );
 }
 
-function MatchCount({
-  label,
+function Stat({
+  dot,
   value,
-  tone,
+  label,
 }: {
-  label: string;
+  dot: string;
   value: number;
-  tone: "success" | "warning" | "neutral";
+  label: string;
 }) {
-  const toneClass = {
-    success: "bg-[#EDFAF3] text-[#1A6640]",
-    warning: "bg-[#FFFBEB] text-[#B45309]",
-    neutral: "bg-white text-muted-foreground",
-  }[tone];
-
   return (
-    <div className={`rounded-lg border border-border px-3 py-2 ${toneClass}`}>
-      <p className="text-lg font-semibold leading-none">{value}</p>
-      <p className="mt-1 text-[11px] font-medium uppercase tracking-wide">{label}</p>
-    </div>
+    <span className="flex items-center gap-1.5">
+      <span className={`size-2 rounded-full ${dot}`} />
+      <span className="text-[13px] font-semibold text-[oklch(0.20_0.006_145)]">{value}</span>
+      <span className="text-[13px] text-[oklch(0.44_0.005_145)]">{label}</span>
+    </span>
   );
 }
 
 function EmptyGroup({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-dashed border-border bg-[#FAFAF9] p-4 text-sm text-muted-foreground">
+    <div className="rounded-xl border border-dashed border-[oklch(0.90_0.003_145)] bg-white p-4 text-[13px] text-[oklch(0.48_0.005_145)]">
       {children}
+    </div>
+  );
+}
+
+function EmptyState({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="rounded-xl border border-dashed border-[oklch(0.90_0.003_145)] bg-[oklch(0.97_0.008_145)] px-5 py-6 text-center">
+      <p className="text-[14px] font-medium text-[oklch(0.38_0.005_145)]">{title}</p>
+      <p className="mt-1 text-[13px] text-[oklch(0.48_0.005_145)]">{detail}</p>
     </div>
   );
 }
@@ -610,85 +604,97 @@ function WorkerCard({
   onSelect: () => void;
   badge?: string;
 }) {
+  const initials = worker.full_name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  const signalReasons = worker.reasons.filter(
+    (r) => r !== "interested" && r !== "document_expired",
+  );
+
   return (
     <button
       type="button"
       onClick={onSelect}
-      className={`rounded-xl border p-3 text-left text-sm transition ${
+      className={`flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors ${
         selected
-          ? "border-[#1A6640] bg-[#EDFAF3] shadow-sm"
-          : "border-border bg-white hover:border-[#1A6640]"
+          ? "bg-[oklch(0.95_0.013_145)]"
+          : "bg-white hover:bg-[oklch(0.97_0.008_145)]"
       }`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span
-              className={`flex size-5 items-center justify-center rounded-full border ${
-                selected
-                  ? "border-[#1A6640] bg-[#1A6640] text-white"
-                  : "border-border bg-white text-transparent"
-              }`}
-            >
-              <Check className="size-3.5" />
-            </span>
-            <p className="font-semibold text-foreground">{worker.full_name}</p>
-          </div>
-          <p className="mt-2 text-muted-foreground">
-            {worker.category} - {worker.city}, {worker.state}
+      <div
+        className={`flex size-8 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold transition-colors ${
+          selected
+            ? "bg-[oklch(0.42_0.115_145)] text-white"
+            : "bg-[oklch(0.91_0.026_145)] text-[oklch(0.34_0.094_145)]"
+        }`}
+      >
+        {selected ? <Check className="size-3.5" /> : initials}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <p className="text-[14px] font-semibold text-[oklch(0.20_0.006_145)]">
+            {worker.full_name}
           </p>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <span className="rounded-full bg-[#F5F5F4] px-2 py-1 text-xs font-semibold text-muted-foreground">
-            {worker.score}
-          </span>
-          {badge ? (
-            <span className="rounded-full bg-[#DCFCE7] px-2 py-0.5 text-xs font-semibold text-[#15803D]">
+          {badge && (
+            <span className="rounded-full bg-[#DCFCE7] px-1.5 py-0.5 text-[11px] font-medium text-[#15803D]">
               {badge}
             </span>
-          ) : null}
-          {worker.expired_documents?.length > 0 ? (
-            <span className="rounded-full bg-[#FEF3C7] px-2 py-0.5 text-xs font-semibold text-[#B45309]">
+          )}
+          {(worker.expired_documents?.length ?? 0) > 0 && (
+            <span className="rounded-full bg-[#FEF3C7] px-1.5 py-0.5 text-[11px] font-medium text-[#B45309]">
               Doc expired
             </span>
-          ) : null}
+          )}
         </div>
-      </div>
-      <p className="mt-2 text-xs text-muted-foreground">
-        {worker.reasons.filter((reason) => reason !== "interested" && reason !== "document_expired").join(", ") ||
-          "Available"}
-      </p>
-      {worker.expired_documents?.length > 0 ? (
-        <p className="mt-1 text-xs text-[#B45309]">
-          Expired: {worker.expired_documents.map((d) => `${d.document_type} (${d.expiry_date})`).join(", ")}
+        <p className="mt-0.5 text-[12px] text-[oklch(0.44_0.005_145)]">
+          {worker.city}, {worker.state}
+          {signalReasons.length > 0 && (
+            <> · {signalReasons.join(" · ")}</>
+          )}
         </p>
-      ) : null}
+      </div>
+      <span className="shrink-0 font-mono text-[12px] text-[oklch(0.62_0.004_145)]">
+        {worker.score}
+      </span>
     </button>
   );
 }
 
 function BlockedWorkerCard({ worker }: { worker: WorkerMatch }) {
   const reason = getBlockedReason(worker);
+  const fix = getBlockedFix(worker, reason);
+
+  const initials = worker.full_name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 
   return (
-    <div className="rounded-xl border border-border bg-[#FAFAF9] p-3 text-left text-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="font-semibold text-foreground">{worker.full_name}</p>
-          <p className="mt-1 text-muted-foreground">
-            {worker.category} - {worker.city}, {worker.state}
-          </p>
-        </div>
-        <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-muted-foreground">
-          {worker.score}
-        </span>
+    <div className="flex items-start gap-3 bg-white px-4 py-3.5">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[oklch(0.90_0.003_145)] text-[12px] font-semibold text-[oklch(0.48_0.005_145)]">
+        {initials}
       </div>
-      <p className="mt-2 inline-flex rounded-full bg-[#FEF3C7] px-2 py-1 text-xs font-medium text-[#B45309]">
-        {reason}
-      </p>
-      <p className="mt-2 text-xs leading-5 text-muted-foreground">
-        {getBlockedFix(worker, reason)}
-      </p>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[14px] font-semibold text-[oklch(0.20_0.006_145)]">{worker.full_name}</p>
+          <span className="shrink-0 font-mono text-[12px] text-[oklch(0.62_0.004_145)]">{worker.score}</span>
+        </div>
+        <p className="mt-0.5 text-[12px] text-[oklch(0.44_0.005_145)]">
+          {worker.city}, {worker.state}
+        </p>
+        <div className="mt-2 flex items-start gap-2">
+          <span className="shrink-0 rounded-full bg-[#FEF3C7] px-2 py-0.5 text-[11px] font-medium text-[#B45309]">
+            {reason}
+          </span>
+          <p className="text-[12px] leading-relaxed text-[oklch(0.48_0.005_145)]">{fix}</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -818,10 +824,42 @@ function buildSalaryOptions(ratePerWorker?: number | null) {
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
-      <label className="mb-1.5 block text-sm font-medium text-foreground">
+      <label className="mb-1.5 block text-[13px] font-medium text-[oklch(0.38_0.005_145)]">
         {label}
       </label>
       {children}
     </div>
+  );
+}
+
+function FormSelect({
+  value,
+  onChange,
+  children,
+}: {
+  value?: string;
+  onChange?: React.ChangeEventHandler<HTMLSelectElement>;
+  children: ReactNode;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={onChange}
+      className="h-11 w-full rounded-xl border border-[oklch(0.90_0.003_145)] bg-white px-3 text-[14px] text-[oklch(0.20_0.006_145)] outline-none transition focus:border-[oklch(0.42_0.115_145)] focus:ring-2 focus:ring-[oklch(0.42_0.115_145)]/20"
+    >
+      {children}
+    </select>
+  );
+}
+
+function FormInput({
+  className = "",
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      {...props}
+      className={`h-11 w-full rounded-xl border border-[oklch(0.90_0.003_145)] bg-white px-3 text-[14px] text-[oklch(0.20_0.006_145)] outline-none transition placeholder:text-[oklch(0.62_0.004_145)] focus:border-[oklch(0.42_0.115_145)] focus:ring-2 focus:ring-[oklch(0.42_0.115_145)]/20 ${className}`}
+    />
   );
 }

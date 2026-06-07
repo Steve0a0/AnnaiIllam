@@ -4,6 +4,7 @@ export type AuthUser = {
   name: string | null;
   role: string;
   is_active?: boolean;
+  permission_group?: string | null;
 };
 
 /** Backward-compat alias — prefer AuthUser in new code */

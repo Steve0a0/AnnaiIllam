@@ -7,7 +7,11 @@ export function getErrorMessage(error: unknown): string {
     if (typeof detail === "object" && detail !== null && "message" in detail) {
       return String(detail.message);
     }
-    return String(detail ?? message ?? "Something went wrong");
+    // Handle cases where FastAPI returns detail as a plain string
+    if (typeof detail === "string" && detail.length > 0) {
+      return detail;
+    }
+    return String(message ?? "Something went wrong");
   }
 
   if (error instanceof Error) {

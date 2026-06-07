@@ -86,6 +86,7 @@ function getInitials(name?: string | null) {
 
 export default function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const user = useAuthStore((s) => s.user);
+  const isSuperAdmin = user?.permission_group === "super_admin";
 
   return (
     <Sidebar
@@ -115,7 +116,14 @@ export default function AppSidebar({ ...props }: React.ComponentProps<typeof Sid
       <SidebarSeparator />
 
       <SidebarContent>
-        <NavMain groups={navGroups} />
+        <NavMain
+          groups={navGroups.map((group) => ({
+            ...group,
+            items: group.items.filter(
+              (item) => item.href !== "/admin-users" || isSuperAdmin
+            ),
+          }))}
+        />
       </SidebarContent>
 
       <SidebarSeparator />

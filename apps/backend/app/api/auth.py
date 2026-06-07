@@ -30,10 +30,12 @@ from app.schemas.auth import (
     RefreshTokenSchema,
 )
 
+from app.repositories.profile_repository import get_client_profile_by_user_id
 from app.services.otp_service import issue_login_otp
 from app.services.token_service import build_token_pair, rotate_refresh_token
 from app.utils.audit import audit_event
 from app.utils.response import success_response
+from app.utils.validators import normalize_phone
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 logger = logging.getLogger(__name__)
@@ -47,6 +49,11 @@ PUBLIC_OTP_ROLES = {UserRole.CLIENT.value, UserRole.WORKER.value}
 def _request_otp_for_role(phone: str, role: str, db: Session):
     if role not in PUBLIC_OTP_ROLES:
         raise HTTPException(status_code=403, detail="This role cannot use public OTP login")
+
+    try:
+        phone = normalize_phone(phone)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid phone number format")
 
     check_rate_limit(f"otp_request:{phone}", limit=5, window_seconds=300)
 
@@ -68,6 +75,11 @@ def _request_otp_for_role(phone: str, role: str, db: Session):
 def _verify_otp_for_role(phone: str, code: str, role: str, db: Session):
     if role not in PUBLIC_OTP_ROLES:
         raise HTTPException(status_code=403, detail="This role cannot use public OTP login")
+
+    try:
+        phone = normalize_phone(phone)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid phone number format")
 
     check_rate_limit(f"otp_verify:{phone}", limit=10, window_seconds=300)
 
@@ -113,6 +125,12 @@ def _verify_otp_for_role(phone: str, code: str, role: str, db: Session):
     db.commit()
     audit_event("otp_verified", {"phone": phone, "role": role, "user_id": user.id})
 
+    display_name: str | None = user.name
+    if not display_name and user.role == UserRole.CLIENT.value:
+        profile = get_client_profile_by_user_id(db, user.id)
+        if profile:
+            display_name = profile.contact_name
+
     return success_response(
         "Login successful",
         {
@@ -122,6 +140,7 @@ def _verify_otp_for_role(phone: str, code: str, role: str, db: Session):
             "user": {
                 "id": user.id,
                 "phone": user.phone,
+                "name": display_name,
                 "role": user.role,
             },
         },

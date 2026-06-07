@@ -28,6 +28,7 @@ from app.repositories.assignment_repository import (
 from app.repositories.attendance_repository import get_attendance_for_assignment
 from app.repositories.payment_repository import get_client_payments_by_requirement_id
 from app.repositories.profile_repository import get_worker_profile_by_id, get_client_profile_by_id
+from app.repositories.quote_repository import get_quote_by_requirement_id
 from app.repositories.requirement_repository import get_requirement_by_id
 from app.schemas.assignment import AssignmentCreateSchema, AssignmentStatusUpdateSchema
 from app.services.assignment_service import build_assignment_entity
@@ -129,31 +130,53 @@ def create_admin_assignment(
             detail="Requirement dates must be set before assigning workers",
         )
 
-    # Payment gate: at least one PAID payment is required before assigning workers
+    # Payment gate: at least one PAID payment is required before assigning workers,
+    # UNLESS the quote has no advance requirement (advance_amount is null or 0).
+    quote = get_quote_by_requirement_id(db, payload.requirement_id)
+    advance_required = quote is not None and (quote.advance_amount or 0) > 0
     if skip_payment_check:
         if not skip_reason or not skip_reason.strip():
             raise HTTPException(
                 status_code=400,
                 detail="skip_reason is required when skip_payment_check=true.",
             )
-    else:
+    elif advance_required:
         payments = get_client_payments_by_requirement_id(db, payload.requirement_id)
         has_paid = any(p.payment_status == ClientPaymentStatus.PAID.value for p in payments)
         if not has_paid:
             raise HTTPException(
                 status_code=400,
-                detail="Cannot assign workers — no confirmed payment for this requirement. "
+                detail="Cannot assign workers — no confirmed advance payment for this requirement. "
                        "Use skip_payment_check=true to override.",
             )
 
-    # Capacity gate: cannot exceed number_of_workers
-    open_count = count_open_assignments_for_requirement(db, payload.requirement_id)
-    if open_count >= requirement.number_of_workers:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Requirement is already at full capacity "
-                   f"({open_count}/{requirement.number_of_workers} workers assigned).",
+    # Per-day capacity gate: no single day in the requested window may exceed number_of_workers
+    req_end_date = requirement.start_date + timedelta(days=requirement.duration_days - 1)
+    new_a_start = payload.start_date or requirement.start_date
+    new_a_end = payload.end_date or req_end_date
+
+    existing_active = [
+        a for a in get_assignments_by_requirement_id(db, payload.requirement_id)
+        if a.status in {
+            AssignmentStatus.ASSIGNED.value,
+            AssignmentStatus.ACCEPTED.value,
+            AssignmentStatus.ACTIVE.value,
+        }
+    ]
+    check_day = new_a_start
+    while check_day <= new_a_end:
+        day_count = sum(
+            1 for a in existing_active
+            if (a.start_date or requirement.start_date) <= check_day <= (a.end_date or req_end_date)
         )
+        if day_count >= requirement.number_of_workers:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{check_day} is already fully staffed "
+                       f"({day_count}/{requirement.number_of_workers} workers). "
+                       f"Choose a different date range.",
+            )
+        check_day += timedelta(days=1)
 
     # Date window validation: assignment dates must not fall outside requirement window
     if payload.start_date is not None or payload.end_date is not None:
@@ -174,9 +197,6 @@ def create_admin_assignment(
     if not worker_profile:
         raise HTTPException(status_code=404, detail="Worker profile not found")
 
-    if not worker_profile.is_available:
-        raise HTTPException(status_code=400, detail="Worker is not available")
-
     if worker_profile.verification_status not in ASSIGNABLE_VERIFICATION_STATUSES:
         raise HTTPException(status_code=400, detail="Only approved workers can be assigned")
 
@@ -184,19 +204,35 @@ def create_admin_assignment(
     if schedule_mismatch:
         raise HTTPException(status_code=400, detail=f"Worker is {schedule_mismatch}")
 
-    existing = find_existing_assignment(db, payload.requirement_id, payload.worker_profile_id)
-    if existing and existing.status != AssignmentStatus.DECLINED.value:
-        raise HTTPException(status_code=400, detail="Worker is already assigned to this requirement")
+    # Per-day model: a worker may have multiple single-day assignments on the same
+    # requirement.  Only block if they are already covering the exact requested day.
+    req_end_date = requirement.start_date + timedelta(days=requirement.duration_days - 1)
+    new_start = payload.start_date or requirement.start_date
+    new_end = payload.end_date or req_end_date
+    for existing in get_assignments_by_requirement_id(db, payload.requirement_id):
+        if existing.worker_profile_id != payload.worker_profile_id:
+            continue
+        if existing.status in _EXCLUDED_STATUSES:
+            continue
+        ex_start = existing.start_date or requirement.start_date
+        ex_end = existing.end_date or req_end_date
+        if ex_start <= new_end and new_start <= ex_end:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Worker is already assigned for this date range on this requirement",
+            )
 
     conflict = detect_worker_conflict(db, payload.worker_profile_id, requirement)
     if conflict:
         raise HTTPException(status_code=400, detail={"message": "Worker has an assignment conflict", "conflict": conflict})
 
     assignment = build_assignment_entity(payload, current_user.id)
-    create_assignment(db, assignment)
 
-    # Fix 16: mark worker unavailable while assigned
-    worker_profile.is_available = False
+    # Auto-set worker salary from quote.worker_daily_rate if not already specified
+    if assignment.salary_amount is None and quote and quote.worker_daily_rate:
+        assignment.salary_amount = quote.worker_daily_rate
+
+    create_assignment(db, assignment)
 
     # Fix 15: sync WorkerInterest status so the interest panel reflects the assignment
     _interest = db.execute(
@@ -376,18 +412,6 @@ def update_assignment_status(
     assignment.status = payload.status
     db.flush()
 
-    # Fix 16: release worker availability when assignment reaches a terminal/rejected state
-    _RELEASE_STATUSES = {
-        AssignmentStatus.DECLINED.value,
-        AssignmentStatus.CANCELLED.value,
-        AssignmentStatus.COMPLETED.value,
-        AssignmentStatus.REPLACED.value,
-    }
-    if payload.status in _RELEASE_STATUSES:
-        _wp = get_worker_profile_by_id(db, assignment.worker_profile_id)
-        if _wp:
-            _wp.is_available = True
-
     requirement = get_requirement_by_id(db, assignment.requirement_id)
     if (
         requirement
@@ -524,9 +548,9 @@ def get_coverage_calendar(
         confirmed_count = len(confirmed)
         checked_in_count = len(checked_in)
 
-        if confirmed_count >= required:
+        if covering_count >= required:
             coverage_status = "full"
-        elif confirmed_count > 0:
+        elif covering_count > 0:
             coverage_status = "partial"
         else:
             coverage_status = "uncovered"
@@ -647,11 +671,6 @@ def replace_worker(
     old_assignment.status = AssignmentStatus.REPLACED.value
     old_assignment.replacement_reason = payload.reason.strip()
 
-    # 2. Free old worker
-    old_worker_profile = get_worker_profile_by_id(db, old_assignment.worker_profile_id)
-    if old_worker_profile:
-        old_worker_profile.is_available = True
-
     # 3. Create new assignment mirroring same role/shift/salary/dates
     new_assignment = Assignment(
         requirement_id=requirement.id,
@@ -672,10 +691,7 @@ def replace_worker(
     # 4. Link old → new
     old_assignment.replaced_by_assignment_id = new_assignment.id
 
-    # 5. Mark new worker as unavailable
-    new_worker_profile.is_available = False
-
-    # 6. Update WorkerInterest for new worker if present
+    # 5. Update WorkerInterest for new worker if present
     _interest = db.execute(
         select(WorkerInterest).where(
             WorkerInterest.worker_profile_id == payload.new_worker_profile_id,

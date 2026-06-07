@@ -28,9 +28,11 @@ function navigateFromData(
   navigationRef: NavigationContainerRefWithCurrent<ParamListBase>,
   data: Record<string, unknown>,
 ): void {
-  const screen = typeof data?.screen === 'string' ? data.screen : null;
-  if (!screen) return;
+  const raw = typeof data?.screen === 'string' ? data.screen : null;
+  if (!raw) return;
   if (!navigationRef.isReady()) return;
+  // Backend still sends 'JobsTab' — remap to HomeTab since the tab was removed
+  const screen = raw === 'JobsTab' ? 'HomeTab' : raw;
   navigationRef.navigate(screen as never);
 }
 

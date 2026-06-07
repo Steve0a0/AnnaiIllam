@@ -19,11 +19,11 @@ from app.schemas.auth import (
 class TestPhoneOtpRequestSchema:
     def test_valid_phone(self):
         schema = PhoneOtpRequestSchema(phone="9876543210")
-        assert schema.phone == "9876543210"
+        assert schema.phone == "+919876543210"
 
     def test_strips_spaces(self):
         schema = PhoneOtpRequestSchema(phone=" 9876543210 ")
-        assert schema.phone == "9876543210"
+        assert schema.phone == "+919876543210"
 
     def test_too_short_raises(self):
         with pytest.raises(ValidationError):

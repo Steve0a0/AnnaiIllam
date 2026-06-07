@@ -15,6 +15,13 @@ export type ClientPaymentRecord = {
   created_at: string;
 };
 
+export type ClientPaymentSummary = ClientPaymentRecord & {
+  requirement_id: number;
+  job_name: string | null;
+  location: string | null;
+  duration_days: number | null;
+};
+
 export type SubmitReferencePayload = {
   requirement_id: number;
   amount: number;
@@ -46,6 +53,12 @@ export type VerifyPaymentPayload = {
 };
 
 export const clientPaymentsService = {
+  /** List all payments for the current client. GET /client/payments */
+  async listAll(): Promise<ClientPaymentSummary[]> {
+    const res = await http.get<Envelope<ClientPaymentSummary[]>>('/client/payments');
+    return res.data.data;
+  },
+
   /** List all payment records for a requirement. GET /client/payments/requirement/{id} */
   async listForRequirement(requirementId: number): Promise<ClientPaymentRecord[]> {
     const res = await http.get<Envelope<ClientPaymentRecord[]>>(
@@ -61,6 +74,14 @@ export const clientPaymentsService = {
       payload,
     );
     return res.data.data;
+  },
+
+  /** Fetch styled HTML invoice for a paid payment. GET /client/payments/{id}/invoice.html */
+  async fetchInvoiceHtml(paymentId: number): Promise<string> {
+    const res = await http.get<string>(`/client/payments/${paymentId}/invoice.html`, {
+      responseType: 'text',
+    });
+    return res.data;
   },
 
   /** Create a Razorpay order. POST /client/payments/create-order */

@@ -96,43 +96,73 @@ def get_worker_payments(
     ]
     auto_run = _get_auto_payroll_run(db, requirement_id)
 
-    result = []
-    for assignment in assignments:
-        worker = get_worker_profile_by_id(db, assignment.worker_profile_id)
-        attendance_records = get_attendance_for_assignment(db, assignment.id)
-        summary = calculate_attendance_summary(attendance_records)
-        suggested_amount = calculate_gross_amount(
-            monthly_salary=assignment.salary_amount,
-            attendance_days=summary["attendance_days"],
-            half_days=summary["half_days"],
-        )
+    # Group by worker so per-day assignments don't create duplicate rows
+    from collections import defaultdict
+    worker_map: dict[int, list] = defaultdict(list)
+    for a in assignments:
+        worker_map[a.worker_profile_id].append(a)
 
+    result = []
+    for worker_profile_id, worker_assignments in worker_map.items():
+        worker = get_worker_profile_by_id(db, worker_profile_id)
+        days_assigned = len(worker_assignments)
+
+        total_att = 0
+        total_half = 0
+        total_absent = 0
+        total_suggested = 0
+
+        for a in worker_assignments:
+            records = get_attendance_for_assignment(db, a.id)
+            summary = calculate_attendance_summary(records)
+            total_att += summary["attendance_days"]
+            total_half += summary["half_days"]
+            total_absent += summary["absent_days"]
+            total_suggested += calculate_gross_amount(
+                monthly_salary=a.salary_amount,
+                attendance_days=summary["attendance_days"],
+                half_days=summary["half_days"],
+            )
+
+        has_attendance = total_att > 0 or total_half > 0 or total_absent > 0
+        # If no attendance has been recorded yet, use assigned days as the
+        # day count and compute suggested amount from assigned day rate
+        if not has_attendance:
+            display_days = days_assigned
+            total_suggested = sum((a.salary_amount or 0) for a in worker_assignments)
+        else:
+            display_days = total_att
+
+        # Use first assignment as the representative for payout lookup
+        first = worker_assignments[0]
         payout_data = None
         if auto_run:
-            item = _get_payroll_item_in_run(db, auto_run.id, assignment.id)
-            if item:
-                payout = _get_payout_by_item(db, item.id)
-                if payout:
-                    payout_data = {
-                        "id": payout.id,
-                        "amount": payout.amount,
-                        "payout_mode": payout.payout_mode,
-                        "payout_status": payout.payout_status,
-                        "transaction_reference": payout.transaction_reference,
-                        "notes": payout.notes,
-                        "paid_at": payout.paid_at.isoformat() if payout.paid_at else None,
-                    }
+            for a in worker_assignments:
+                item = _get_payroll_item_in_run(db, auto_run.id, a.id)
+                if item:
+                    payout = _get_payout_by_item(db, item.id)
+                    if payout:
+                        payout_data = {
+                            "id": payout.id,
+                            "amount": payout.amount,
+                            "payout_mode": payout.payout_mode,
+                            "payout_status": payout.payout_status,
+                            "transaction_reference": payout.transaction_reference,
+                            "notes": payout.notes,
+                            "paid_at": payout.paid_at.isoformat() if payout.paid_at else None,
+                        }
+                        break
 
         result.append(
             {
-                "assignment_id": assignment.id,
-                "worker_profile_id": assignment.worker_profile_id,
+                "assignment_id": first.id,
+                "worker_profile_id": worker_profile_id,
                 "worker_name": worker.full_name if worker else "Unknown",
-                "salary_amount": assignment.salary_amount,
-                "attendance_days": summary["attendance_days"],
-                "half_days": summary["half_days"],
-                "absent_days": summary["absent_days"],
-                "suggested_amount": suggested_amount,
+                "salary_amount": first.salary_amount,
+                "attendance_days": display_days,
+                "half_days": total_half,
+                "absent_days": total_absent,
+                "suggested_amount": total_suggested,
                 "payout": payout_data,
             }
         )
@@ -218,6 +248,10 @@ def record_worker_payment(
         paid_at=utcnow(),
     )
     db.add(payout)
+    # Sync payroll item amounts to the admin-entered payment so the worker
+    # sees the correct figure in the earnings screen.
+    payroll_item.gross_amount = payload.amount
+    payroll_item.net_amount = payload.amount
     payroll_item.payment_status = PayrollItemPaymentStatus.PAID.value
     db.commit()
     db.refresh(payout)

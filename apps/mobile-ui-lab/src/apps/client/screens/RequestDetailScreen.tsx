@@ -4,7 +4,7 @@ import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Clock, CheckCircle2 } from 'lucide-react-native';
+import { Clock, CheckCircle2, XCircle } from 'lucide-react-native';
 import { clientRequirementsService, type ClientRequirementDetail } from '../../../shared/services/client-requirements.service';
 import {
   clientPaymentsService,
@@ -117,7 +117,7 @@ export default function RequestDetailScreen() {
     const title = action === 'approve' ? 'Approve quote?' : 'Reject quote?';
     const message = action === 'approve'
       ? 'After approval, admin can assign workers to this request.'
-      : 'This will reject the quote and move the request to rejected.';
+      : 'This will reject the quote and send the request back to admin for review.';
 
     Alert.alert(title, message, [
       { text: 'Cancel', style: 'cancel' },
@@ -129,6 +129,11 @@ export default function RequestDetailScreen() {
           try {
             await clientRequirementsService.decideQuote(detail.id, action);
             await load();
+            if (action === 'approve') {
+              Alert.alert('Quote approved', 'Your request is now approved. Pay the advance to confirm worker deployment.');
+            } else {
+              Alert.alert('Quote rejected', 'Admin has been notified and will send a revised quote shortly.');
+            }
           } catch {
             Alert.alert('Could not update quote', 'Please try again.');
           } finally {
@@ -168,6 +173,52 @@ export default function RequestDetailScreen() {
                 <Info label="Shift" value={detail.shift_details ?? 'Not specified'} />
               </View>
             </View>
+
+            {/* ── Rejection notice ── */}
+            {detail.status === 'rejected' && (
+              <View style={styles.rejectionBanner}>
+                <View style={styles.rejectionIconRow}>
+                  <View style={styles.rejectionIconBox}>
+                    <XCircle size={18} color={C.dangerText} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rejectionHeading}>Request not approved</Text>
+                    <Text style={styles.rejectionSubtext}>Our team reviewed your request and was unable to proceed.</Text>
+                  </View>
+                </View>
+                {detail.rejection_reason ? (
+                  <View style={styles.rejectionReasonBox}>
+                    <Text style={styles.rejectionReasonLabel}>Reason given</Text>
+                    <Text style={styles.rejectionReasonText}>{detail.rejection_reason}</Text>
+                  </View>
+                ) : null}
+                <Pressable
+                  style={({ pressed }) => [styles.resubmitBtn, pressed && { opacity: 0.85 }]}
+                  onPress={() => navigation.navigate('CreateRequest')}
+                >
+                  <Text style={styles.resubmitBtnText}>Submit a new request →</Text>
+                </Pressable>
+              </View>
+            )}
+
+            {/* ── Cancellation notice ── */}
+            {detail.status === 'cancelled' && detail.cancellation_reason ? (
+              <View style={styles.cancellationBanner}>
+                <View style={styles.rejectionIconRow}>
+                  <View style={styles.cancellationIconBox}>
+                    <XCircle size={18} color={C.warningText} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cancellationHeading}>Request cancelled</Text>
+                    <Text style={styles.cancellationSubtext}>This request was cancelled before workers were assigned.</Text>
+                  </View>
+                </View>
+                <View style={styles.cancellationReasonBox}>
+                  <Text style={styles.cancellationReasonLabel}>Cancellation reason</Text>
+                  <Text style={styles.cancellationReasonText}>{detail.cancellation_reason}</Text>
+                </View>
+              </View>
+            ) : null}
 
             <View style={clientStyles.card}>
               <Text style={clientStyles.sectionLabel}>Status timeline</Text>
@@ -730,8 +781,121 @@ const styles = StyleSheet.create({
     color: C.dangerText,
     fontSize: 15,
     fontWeight: '600' as const,
+  },  rejectionBanner: {
+    backgroundColor: C.dangerBg,
+    borderColor: '#FECACA',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    gap: 14,
   },
-  expiredBanner: {
+  rejectionIconRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    gap: 12,
+  },
+  rejectionIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#FEE2E2',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  rejectionHeading: {
+    color: C.dangerText,
+    fontSize: 15,
+    fontWeight: '700' as const,
+  },
+  rejectionSubtext: {
+    color: '#EF4444',
+    fontSize: 13,
+    marginTop: 2,
+    lineHeight: 18,
+  },
+  rejectionReasonBox: {
+    backgroundColor: '#FEF2F2',
+    borderLeftWidth: 3,
+    borderLeftColor: C.dangerText,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  rejectionReasonLabel: {
+    color: C.dangerText,
+    fontSize: 10,
+    fontWeight: '700' as const,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 1,
+    marginBottom: 4,
+  },
+  rejectionReasonText: {
+    color: '#7F1D1D',
+    fontSize: 14,
+    lineHeight: 22,
+    fontStyle: 'italic' as const,
+  },
+  resubmitBtn: {
+    backgroundColor: C.dangerText,
+    borderRadius: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 16,
+    alignItems: 'center' as const,
+  },
+  resubmitBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600' as const,
+  },
+  cancellationBanner: {
+    backgroundColor: C.warningBg,
+    borderColor: '#FDE68A',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    gap: 14,
+  },
+  cancellationIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#FEF3C7',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  cancellationHeading: {
+    color: C.warningText,
+    fontSize: 15,
+    fontWeight: '700' as const,
+  },
+  cancellationSubtext: {
+    color: '#D97706',
+    fontSize: 13,
+    marginTop: 2,
+    lineHeight: 18,
+  },
+  cancellationReasonBox: {
+    backgroundColor: '#FFFBEB',
+    borderLeftWidth: 3,
+    borderLeftColor: C.warningText,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  cancellationReasonLabel: {
+    color: C.warningText,
+    fontSize: 10,
+    fontWeight: '700' as const,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 1,
+    marginBottom: 4,
+  },
+  cancellationReasonText: {
+    color: '#78350F',
+    fontSize: 14,
+    lineHeight: 22,
+    fontStyle: 'italic' as const,
+  },  expiredBanner: {
     marginTop: 14,
     borderRadius: 10,
     padding: 14,

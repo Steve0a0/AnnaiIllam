@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+﻿from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -88,21 +88,31 @@ def detect_worker_conflict(db: Session, worker_profile_id: int, requirement) -> 
     # Without dates we cannot compute overlap — return no conflict rather than crashing.
     if requirement.start_date is None or requirement.duration_days is None:
         return None
+    req_end = requirement.start_date + timedelta(days=max(requirement.duration_days, 1) - 1)
     for assignment in get_active_assignments_by_worker_profile_id(db, worker_profile_id):
-        existing_requirement = get_requirement_by_id(db, assignment.requirement_id)
-        if not existing_requirement:
+        # Same requirement - multiple single-day assignments are allowed; per-day cap
+        # is enforced at createAssignment time, not here.
+        if assignment.requirement_id == requirement.id:
             continue
-        if dates_overlap(
-            requirement.start_date,
-            requirement.duration_days,
-            existing_requirement.start_date,
-            existing_requirement.duration_days,
-        ):
+        # Use the assignment's actual dates when set; fall back to the parent
+        # requirement's full window for legacy rows that lack those fields.
+        if assignment.start_date is not None and assignment.end_date is not None:
+            assign_start = assignment.start_date
+            assign_end = assignment.end_date
+        else:
+            existing_requirement = get_requirement_by_id(db, assignment.requirement_id)
+            if not existing_requirement:
+                continue
+            assign_start = existing_requirement.start_date
+            assign_end = existing_requirement.start_date + timedelta(
+                days=max(existing_requirement.duration_days, 1) - 1
+            )
+        if requirement.start_date <= assign_end and assign_start <= req_end:
             return {
                 "assignment_id": assignment.id,
-                "requirement_id": existing_requirement.id,
-                "start_date": str(existing_requirement.start_date),
-                "duration_days": existing_requirement.duration_days,
+                "requirement_id": assignment.requirement_id,
+                "start_date": str(assign_start),
+                "duration_days": (assign_end - assign_start).days + 1,
                 "status": assignment.status,
             }
     return None
@@ -284,25 +294,31 @@ def get_worker_matches(db: Session, requirement) -> list[dict]:
             reqs_for_conflicts[req.id] = req
 
     # Pre-compute per-worker conflict (pure Python, no DB).
+    # Use the assignment's actual start/end dates when set; fall back to the
+    # parent requirement's full window for legacy rows that lack those fields.
     conflict_map: dict[int, dict | None] = {}
     if requirement.start_date is not None and requirement.duration_days is not None:
+        req_end = requirement.start_date + timedelta(days=max(requirement.duration_days, 1) - 1)
         for worker_id, worker_assignments in assignments_by_worker.items():
             conflict_map[worker_id] = None
             for a in worker_assignments:
-                existing_req = reqs_for_conflicts.get(a.requirement_id)
-                if not existing_req:
-                    continue
-                if dates_overlap(
-                    requirement.start_date,
-                    requirement.duration_days,
-                    existing_req.start_date,
-                    existing_req.duration_days,
-                ):
+                if a.start_date is not None and a.end_date is not None:
+                    assign_start = a.start_date
+                    assign_end = a.end_date
+                else:
+                    existing_req = reqs_for_conflicts.get(a.requirement_id)
+                    if not existing_req:
+                        continue
+                    assign_start = existing_req.start_date
+                    assign_end = existing_req.start_date + timedelta(
+                        days=max(existing_req.duration_days, 1) - 1
+                    )
+                if requirement.start_date <= assign_end and assign_start <= req_end:
                     conflict_map[worker_id] = {
                         "assignment_id": a.id,
-                        "requirement_id": existing_req.id,
-                        "start_date": str(existing_req.start_date),
-                        "duration_days": existing_req.duration_days,
+                        "requirement_id": a.requirement_id,
+                        "start_date": str(assign_start),
+                        "duration_days": (assign_end - assign_start).days + 1,
                         "status": a.status,
                     }
                     break
@@ -336,107 +352,3 @@ def get_worker_matches(db: Session, requirement) -> list[dict]:
     return sorted(matches, key=lambda item: item["score"], reverse=True)
 
 
-ASSIGNABLE_VERIFICATION_STATUSES = {"approved", "verified"}
-DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
-
-def _csv_set(value: list[str] | str | None) -> set[str]:
-    if not value:
-        return set()
-    if isinstance(value, list):
-        return {item.strip().lower() for item in value if item.strip()}
-    return {item.strip().lower() for item in value.split(",") if item.strip()}
-
-
-def _shift_matches(available_shift: str, requirement_shift: str) -> bool:
-    """Match broad worker shift preferences against request shift labels."""
-    shift = available_shift.strip().lower()
-    required = requirement_shift.strip().lower()
-
-    if not shift or not required:
-        return True
-
-    if shift in required:
-        return True
-
-    if shift in {"full day", "general", "general shift"} and any(
-        token in required for token in {"general", "09:00", "9:00"}
-    ):
-        return True
-
-    if shift == "morning" and any(token in required for token in {"morning", "06:00", "6:00", "09:00", "9:00"}):
-        return True
-
-    if shift == "afternoon" and any(token in required for token in {"afternoon", "evening", "14:00", "2:00"}):
-        return True
-
-    if shift == "evening" and any(token in required for token in {"evening", "14:00", "2:00"}):
-        return True
-
-    if shift == "night" and any(token in required for token in {"night", "22:00", "10:00"}):
-        return True
-
-    return False
-
-
-def get_worker_schedule_mismatch(worker, requirement) -> str | None:
-    available_days = _csv_set(worker.available_days)
-    if available_days and requirement.start_date is not None:
-        required_day = DAYS[requirement.start_date.weekday()].lower()
-        if required_day not in available_days:
-            return "not available on requested day"
-
-    available_shifts = _csv_set(worker.available_shifts)
-    shift_details = (requirement.shift_details or "").lower()
-    if available_shifts and shift_details:
-        if not any(_shift_matches(shift, shift_details) for shift in available_shifts):
-            return "not available for requested shift"
-
-    return None
-
-
-def dates_overlap(start_a, duration_a: int, start_b, duration_b: int) -> bool:
-    end_a = start_a + timedelta(days=max(duration_a, 1) - 1)
-    end_b = start_b + timedelta(days=max(duration_b, 1) - 1)
-    return start_a <= end_b and start_b <= end_a
-
-
-def detect_worker_conflict(db: Session, worker_profile_id: int, requirement) -> dict | None:
-    # Without dates we cannot compute overlap — return no conflict rather than crashing.
-    if requirement.start_date is None or requirement.duration_days is None:
-        return None
-    for assignment in get_active_assignments_by_worker_profile_id(db, worker_profile_id):
-        existing_requirement = get_requirement_by_id(db, assignment.requirement_id)
-        if not existing_requirement:
-            continue
-        if dates_overlap(
-            requirement.start_date,
-            requirement.duration_days,
-            existing_requirement.start_date,
-            existing_requirement.duration_days,
-        ):
-            return {
-                "assignment_id": assignment.id,
-                "requirement_id": existing_requirement.id,
-                "start_date": str(existing_requirement.start_date),
-                "duration_days": existing_requirement.duration_days,
-                "status": assignment.status,
-            }
-    return None
-
-
-def get_expired_documents(db: Session, worker_profile_id: int) -> list[dict]:
-    """Returns non-rejected documents whose expiry_date is strictly before today."""
-    today = date.today()
-    rows = db.execute(
-        select(WorkerDocument).where(
-            WorkerDocument.worker_profile_id == worker_profile_id,
-            WorkerDocument.expiry_date.is_not(None),
-            WorkerDocument.expiry_date < today,
-            WorkerDocument.verification_status != "rejected",
-        )
-    ).scalars().all()
-    return [
-        {"document_type": doc.document_type, "expiry_date": str(doc.expiry_date)}
-        for doc in rows
-    ]

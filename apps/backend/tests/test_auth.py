@@ -6,6 +6,7 @@ from app.core.security import hash_password
 from app.models.otp_code import OtpCode
 from app.models.user import User
 from app.utils.time import utcnow
+from app.utils.validators import normalize_phone
 
 BASE = "/api/v1"
 
@@ -16,6 +17,7 @@ BASE = "/api/v1"
 
 def _seed_otp(db, phone: str, code: str, *, expired=False, used=False, attempts=0):
     """Insert a real OTP record with the given code into the test DB."""
+    phone = normalize_phone(phone)
     expires_at = (
         utcnow() - timedelta(minutes=1)
         if expired
@@ -80,7 +82,7 @@ class TestClientVerifyOtpNewUser:
         assert "access_token" in data
         assert "refresh_token" in data
         assert data["user"]["role"] == "client"
-        assert data["user"]["phone"] == phone
+        assert data["user"]["phone"] == "+91" + phone
 
     def test_existing_client_user_returned(self, client, client_user):
         phone = client_user.phone

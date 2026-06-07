@@ -6,7 +6,7 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.roles import require_role
+from app.api.dependencies.roles import require_permission_group, require_role
 from app.core.attendance_constants import AttendanceApprovalStatus, AttendanceStatus
 from app.core.roles import UserRole
 from app.db.deps import get_db
@@ -136,7 +136,7 @@ def correct_attendance_record(
     attendance_id: int,
     payload: AttendanceCorrectionSchema,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(require_role(UserRole.ADMIN.value)),
+    current_user: User = Depends(require_permission_group("super_admin")),
     db: Session = Depends(get_db),
 ):
     attendance = get_attendance_by_id(db, attendance_id)

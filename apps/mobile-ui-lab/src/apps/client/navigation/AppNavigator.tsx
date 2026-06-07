@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Briefcase, House, MessageCircleWarning, User } from 'lucide-react-native';
+import { House, MessageCircleWarning, User } from 'lucide-react-native';
 
 import HomeScreen from '../screens/HomeScreen';
 import CreateRequestScreen from '../screens/CreateRequestScreen';
@@ -12,6 +12,8 @@ import ComplaintsScreen from '../screens/ComplaintsScreen';
 import RaiseComplaintScreen from '../screens/RaiseComplaintScreen';
 import ComplaintDetailScreen from '../screens/ComplaintDetailScreen';
 import ClientProfileScreen from '../screens/ClientProfileScreen';
+import BillingOverviewScreen from '../screens/BillingOverviewScreen';
+import InvoiceViewerScreen from '../screens/InvoiceViewerScreen';
 import InvoiceDetailScreen from '../screens/InvoiceDetailScreen';
 import PaymentConfirmScreen from '../screens/PaymentConfirmScreen';
 import RateRequirementScreen from '../screens/RateRequirementScreen';
@@ -20,14 +22,12 @@ import DisputeScreen from '../screens/DisputeScreen';
 import type {
   ClientTabParamList,
   HomeStackParamList,
-  JobsStackParamList,
   ComplaintsStackParamList,
   ProfileStackParamList,
 } from './types';
 
 const Tab = createBottomTabNavigator<ClientTabParamList>();
 const HomeStack = createNativeStackNavigator<HomeStackParamList>();
-const JobsStack = createNativeStackNavigator<JobsStackParamList>();
 const ComplaintsStack = createNativeStackNavigator<ComplaintsStackParamList>();
 const ProfileStack = createNativeStackNavigator<ProfileStackParamList>();
 
@@ -42,6 +42,7 @@ function HomeStackNavigator() {
   return (
     <HomeStack.Navigator screenOptions={{ headerShown: false }}>
       <HomeStack.Screen name="Home" component={HomeScreen} />
+      <HomeStack.Screen name="AllRequests" component={RequestsScreen} />
       <HomeStack.Screen name="CreateRequest" component={CreateRequestScreen} />
       <HomeStack.Screen name="RequestDetail" component={RequestDetailScreen} />
       <HomeStack.Screen name="AssignedWorkers" component={AssignedWorkersScreen} />
@@ -51,22 +52,6 @@ function HomeStackNavigator() {
       <HomeStack.Screen name="RateRequirement" component={RateRequirementScreen} />
       <HomeStack.Screen name="RaiseDispute" component={DisputeScreen} />
     </HomeStack.Navigator>
-  );
-}
-
-function JobsStackNavigator() {
-  return (
-    <JobsStack.Navigator screenOptions={{ headerShown: false }}>
-      <JobsStack.Screen name="Requests" component={RequestsScreen} />
-      <JobsStack.Screen name="CreateRequest" component={CreateRequestScreen} />
-      <JobsStack.Screen name="RequestDetail" component={RequestDetailScreen} />
-      <JobsStack.Screen name="AssignedWorkers" component={AssignedWorkersScreen} />
-      <JobsStack.Screen name="RaiseComplaint" component={RaiseComplaintScreen} />
-      <JobsStack.Screen name="InvoiceDetail" component={InvoiceDetailScreen} />
-      <JobsStack.Screen name="PaymentConfirm" component={PaymentConfirmScreen} />
-      <JobsStack.Screen name="RateRequirement" component={RateRequirementScreen} />
-      <JobsStack.Screen name="RaiseDispute" component={DisputeScreen} />
-    </JobsStack.Navigator>
   );
 }
 
@@ -84,6 +69,8 @@ function ProfileStackNavigator() {
   return (
     <ProfileStack.Navigator screenOptions={{ headerShown: false }}>
       <ProfileStack.Screen name="ClientProfile" component={ClientProfileScreen} />
+      <ProfileStack.Screen name="BillingOverview" component={BillingOverviewScreen} />
+      <ProfileStack.Screen name="InvoiceViewer" component={InvoiceViewerScreen} />
     </ProfileStack.Navigator>
   );
 }
@@ -109,7 +96,6 @@ export default function AppNavigator() {
         },
         tabBarIcon: ({ color, size }) => {
           if (route.name === 'HomeTab') return <House size={size} color={color} />;
-          if (route.name === 'JobsTab') return <Briefcase size={size} color={color} />;
           if (route.name === 'ComplaintsTab') return <MessageCircleWarning size={size} color={color} />;
           if (route.name === 'ProfileTab') return <User size={size} color={color} />;
           return null;
@@ -120,11 +106,6 @@ export default function AppNavigator() {
         name="HomeTab"
         component={HomeStackNavigator}
         options={{ tabBarLabel: 'Home' }}
-      />
-      <Tab.Screen
-        name="JobsTab"
-        component={JobsStackNavigator}
-        options={{ tabBarLabel: 'Jobs' }}
       />
       <Tab.Screen
         name="ComplaintsTab"

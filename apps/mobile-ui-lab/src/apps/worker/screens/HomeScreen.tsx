@@ -1008,7 +1008,7 @@ function UpcomingJobCard({
               {requirement ? `${requirement.city}, ${requirement.state}` : 'Location not available'}
             </Text>
             <Text marginTop={8} fontSize={13} color={C.neutral700} fontFamily="$mono">
-              {requirement ? formatDate(requirement.start_date) : 'Date not available'}
+              {assignment.start_date ? formatDate(assignment.start_date) : requirement ? formatDate(requirement.start_date) : 'Date not available'}
             </Text>
           </YStack>
           <StatusPill status={assignment.status} />
@@ -1218,9 +1218,16 @@ async function getCurrentLocation() {
   return position;
 }
 
+function assignmentCoversDate(assignment: WorkerAssignment, dateKey: string): boolean {
+  if (!assignment.start_date) return false;
+  const start = assignment.start_date;
+  const end = assignment.end_date ?? assignment.start_date;
+  return start <= dateKey && dateKey <= end;
+}
+
 function pickHeroAssignment(assignments: WorkerAssignment[], selectedDateKey: string) {
-  const selectedAssignments = assignments.filter(
-    (item) => item.requirement?.start_date && toDateKey(parseApiDate(item.requirement.start_date)) === selectedDateKey,
+  const selectedAssignments = assignments.filter((item) =>
+    assignmentCoversDate(item, selectedDateKey),
   );
 
   return (
@@ -1235,12 +1242,19 @@ function pickHeroAssignment(assignments: WorkerAssignment[], selectedDateKey: st
 function buildWeek(assignments: WorkerAssignment[], visibleDate: Date, selectedDateKey: string) {
   const today = new Date();
   const start = startOfWeek(visibleDate);
-  const jobDates = new Set(
-    assignments
-      .map((item) => item.requirement?.start_date)
-      .filter((item): item is string => Boolean(item))
-      .map((item) => toDateKey(parseApiDate(item))),
-  );
+
+  // Collect every individual date covered by any assignment (handles multi-day ranges).
+  const jobDates = new Set<string>();
+  for (const item of assignments) {
+    if (!item.start_date) continue;
+    const assignEnd = item.end_date ?? item.start_date;
+    let cur = parseApiDate(item.start_date);
+    const endDate = parseApiDate(assignEnd);
+    while (cur <= endDate) {
+      jobDates.add(toDateKey(cur));
+      cur = addDays(cur, 1);
+    }
+  }
 
   return Array.from({ length: 7 }).map((_, index) => {
     const date = addDays(start, index);
@@ -1273,11 +1287,14 @@ function parseApiDate(value: string) {
   return new Date(year, month - 1, day);
 }
 
-function formatTime(value: string) {
+function formatTime(value: string | null | undefined) {
+  if (!value) return '—';
+  const d = new Date(value.replace(' ', 'T'));
+  if (isNaN(d.getTime())) return '—';
   return new Intl.DateTimeFormat('en-IN', {
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+  }).format(d);
 }
 
 function addDays(date: Date, days: number) {
@@ -1339,8 +1356,9 @@ function formatWeekRange(from: Date, to: Date) {
   return `${month} ${dayFrom} – ${monthTo} ${dayTo}`;
 }
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).format(
-    parseApiDate(value),
-  );
+function formatDate(value: string | null | undefined) {
+  if (!value) return '—';
+  const d = parseApiDate(value);
+  if (isNaN(d.getTime())) return '—';
+  return new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).format(d);
 }

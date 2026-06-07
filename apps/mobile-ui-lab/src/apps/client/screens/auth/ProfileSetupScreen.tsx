@@ -35,6 +35,7 @@ export default function ProfileSetupScreen(_props: Props) {
   const [companyName, setCompanyName] = useState('');
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
+  const [email, setEmail] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
 
@@ -55,6 +56,10 @@ export default function ProfileSetupScreen(_props: Props) {
       Alert.alert('Missing state', 'Please enter your state.');
       return;
     }
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      Alert.alert('Invalid email', 'Please enter a valid email address or leave it blank.');
+      return;
+    }
 
     setIsSaving(true);
     try {
@@ -64,6 +69,7 @@ export default function ProfileSetupScreen(_props: Props) {
         contact_name: contactName.trim(),
         city: city.trim(),
         state: state.trim(),
+        email: email.trim() || null,
       });
       await authStorage.setIsProfileComplete(true);
       setProfileComplete(true);
@@ -186,9 +192,31 @@ export default function ProfileSetupScreen(_props: Props) {
               onFocus={() => setFocused('state')}
               onBlur={() => setFocused(null)}
               autoCapitalize="words"
-              returnKeyType="done"
+              returnKeyType="next"
             />
           </View>
+        </View>
+
+        {/* Email — for invoice delivery */}
+        <View style={styles.fieldGroup}>
+          <Text style={styles.label}>
+            Email address{' '}
+            <Text style={{ color: '#b5ad9e', fontWeight: '400' }}>(optional)</Text>
+          </Text>
+          <TextInput
+            style={inputStyle('email')}
+            placeholder="you@example.com"
+            placeholderTextColor="#b5ad9e"
+            value={email}
+            onChangeText={setEmail}
+            onFocus={() => setFocused('email')}
+            onBlur={() => setFocused(null)}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="done"
+          />
+          <Text style={styles.fieldHint}>We’ll send payment invoices to this address.</Text>
         </View>
 
         {/* Trust note */}
@@ -367,6 +395,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     letterSpacing: 0.2,
+  },
+  fieldHint: {
+    marginTop: 5,
+    fontSize: 12,
+    color: '#b5ad9e',
   },
   footerNote: {
     textAlign: 'center',

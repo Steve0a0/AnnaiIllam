@@ -15,7 +15,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import * as AppleAuthentication from 'expo-apple-authentication';
-import * as AuthSession from 'expo-auth-session';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import { getApiError } from '../../../../shared/lib/get-api-error';
@@ -77,12 +76,13 @@ type GoogleBtnProps = { onSignIn: (result: SocialAuthTokens) => Promise<void> };
 
 function GoogleSignInButton({ onSignIn }: GoogleBtnProps) {
   const [isPending, setIsPending] = useState(false);
-  const redirectUri = AuthSession.makeRedirectUri();
+  // Do NOT pass redirectUri — the Google provider derives the correct platform-specific
+  // URI from iosClientId / androidClientId (reversed-client-ID scheme).
+  // Overriding it with makeRedirectUri() breaks native builds.
   const [, , promptAsync] = Google.useAuthRequest({
     webClientId: GOOGLE_WEB_ID,
     iosClientId: GOOGLE_IOS_ID,
     androidClientId: GOOGLE_ANDROID_ID,
-    redirectUri,
   });
 
   const handlePress = async () => {

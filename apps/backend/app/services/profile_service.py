@@ -15,6 +15,7 @@ def build_client_profile(payload, user_id: int) -> ClientProfile:
         state=payload.state,
         address=payload.address,
         gst_number=payload.gst_number,
+        email=getattr(payload, 'email', None),
     )
 
 

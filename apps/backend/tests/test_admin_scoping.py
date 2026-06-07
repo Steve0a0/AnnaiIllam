@@ -106,8 +106,8 @@ def admin_headers(db, user: User) -> dict:
 # ──────────────────────────────────────────────────────────────────
 
 
-def test_regular_admin_sees_only_assigned_clients_requirements(client, db, admin_user):
-    # Create a regular (non-super) admin
+def test_regular_admin_sees_all_requirements_regardless_of_assignments(client, db, admin_user):
+    # ops_admin sees ALL requirements, not just assigned clients
     reg_admin = make_admin(db, "9001000001", "regadmin1@test.com", "ops_admin")
     reg_headers = admin_headers(db, reg_admin)
 
@@ -117,9 +117,9 @@ def test_regular_admin_sees_only_assigned_clients_requirements(client, db, admin
     cp3 = make_client(db, "9002000003", "c3@test.com")
     req1 = make_requirement(db, cp1)
     req2 = make_requirement(db, cp2)
-    _req3 = make_requirement(db, cp3)
+    req3 = make_requirement(db, cp3)
 
-    # Assign only cp1 and cp2 to reg_admin
+    # Assign only cp1 and cp2 to reg_admin — cp3 is NOT assigned
     db.add(AdminClientAssignment(
         admin_user_id=reg_admin.id,
         client_profile_id=cp1.id,
@@ -135,10 +135,10 @@ def test_regular_admin_sees_only_assigned_clients_requirements(client, db, admin
     resp = client.get(f"{BASE}/admin/requirements", headers=reg_headers)
     assert resp.status_code == 200, resp.json()
     ids = [r["id"] for r in resp.json()["data"]["items"]]
+    # ops_admin sees ALL requirements, including unassigned cp3's requirement
     assert req1.id in ids
     assert req2.id in ids
-    # cp3's requirement must NOT appear
-    assert _req3.id not in ids
+    assert req3.id in ids
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -146,17 +146,18 @@ def test_regular_admin_sees_only_assigned_clients_requirements(client, db, admin
 # ──────────────────────────────────────────────────────────────────
 
 
-def test_regular_admin_with_no_assignments_sees_empty_list(client, db):
+def test_regular_admin_with_no_assignments_sees_all_requirements(client, db):
+    # ops_admin with no assignments should still see ALL requirements
     reg_admin = make_admin(db, "9001000002", "regadmin2@test.com", "ops_admin")
     reg_headers = admin_headers(db, reg_admin)
 
-    # Create a requirement (not assigned to this admin)
     cp = make_client(db, "9002000004", "c4@test.com")
-    make_requirement(db, cp)
+    req = make_requirement(db, cp)
 
     resp = client.get(f"{BASE}/admin/requirements", headers=reg_headers)
     assert resp.status_code == 200, resp.json()
-    assert resp.json()["data"]["items"] == []
+    ids = [r["id"] for r in resp.json()["data"]["items"]]
+    assert req.id in ids
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -182,17 +183,17 @@ def test_super_admin_sees_all_requirements(client, db, admin_user):
 # ──────────────────────────────────────────────────────────────────
 
 
-def test_regular_admin_cannot_access_unassigned_requirement_by_id(client, db, admin_user):
+def test_regular_admin_can_access_any_requirement_by_id(client, db, admin_user):
+    # ops_admin has unrestricted view — no 403 on unassigned requirement detail
     reg_admin = make_admin(db, "9001000003", "regadmin3@test.com", "ops_admin")
     reg_headers = admin_headers(db, reg_admin)
 
     cp = make_client(db, "9002000006", "c6@test.com")
     req = make_requirement(db, cp)
-    # Do NOT assign cp to reg_admin
+    # cp is NOT assigned to reg_admin — but ops_admin still has access
 
     resp = client.get(f"{BASE}/admin/requirements/{req.id}", headers=reg_headers)
-    assert resp.status_code == 403
-    assert "authorised" in resp.json()["message"].lower()
+    assert resp.status_code == 200, resp.json()
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -200,7 +201,8 @@ def test_regular_admin_cannot_access_unassigned_requirement_by_id(client, db, ad
 # ──────────────────────────────────────────────────────────────────
 
 
-def test_assigning_client_grants_access_to_requirement(client, db, admin_user):
+def test_assigning_client_via_scoping_api_succeeds(client, db, admin_user):
+    # Client assignment API still works — assignments are tracked for future features
     reg_admin = make_admin(db, "9001000004", "regadmin4@test.com", "ops_admin")
     reg_headers = admin_headers(db, reg_admin)
     super_headers = admin_headers(db, admin_user)
@@ -208,20 +210,15 @@ def test_assigning_client_grants_access_to_requirement(client, db, admin_user):
     cp = make_client(db, "9002000007", "c7@test.com")
     req = make_requirement(db, cp)
 
-    # Before assignment: not visible
+    # ops_admin already sees the requirement before any assignment
     resp_before = client.get(f"{BASE}/admin/requirements", headers=reg_headers)
     ids_before = [r["id"] for r in resp_before.json()["data"]["items"]]
-    assert req.id not in ids_before
+    assert req.id in ids_before
 
-    # Super admin assigns the client
+    # Super admin can still assign clients via the scoping API
     assign_resp = client.post(
         f"{BASE}/admin/scoping/assign",
         json={"admin_user_id": reg_admin.id, "client_profile_id": cp.id},
         headers=super_headers,
     )
     assert assign_resp.status_code == 200, assign_resp.json()
-
-    # After assignment: visible
-    resp_after = client.get(f"{BASE}/admin/requirements", headers=reg_headers)
-    ids_after = [r["id"] for r in resp_after.json()["data"]["items"]]
-    assert req.id in ids_after

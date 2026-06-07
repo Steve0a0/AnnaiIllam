@@ -31,6 +31,7 @@ from app.services.storage_service import generate_download_url, is_s3_configured
 from app.utils.audit import audit_event
 from app.utils.pagination import PaginationParams, paginate, pagination_meta
 from app.utils.response import success_response
+from app.utils.validators import normalize_phone
 
 
 class WorkerAvailabilityToggleSchema(BaseModel):
@@ -155,7 +156,12 @@ def create_admin_client(
     current_user: User = Depends(require_role(UserRole.ADMIN.value)),
     db: Session = Depends(get_db),
 ):
-    existing = db.execute(select(User).where(User.phone == payload.phone)).scalar_one_or_none()
+    try:
+        phone = normalize_phone(payload.phone)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid phone number format")
+
+    existing = db.execute(select(User).where(User.phone == phone)).scalar_one_or_none()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -163,7 +169,7 @@ def create_admin_client(
         )
 
     user = User(
-        phone=payload.phone,
+        phone=phone,
         role=UserRole.CLIENT.value,
         is_active=True,
         is_phone_verified=False,
@@ -254,7 +260,7 @@ def update_admin_client(
 @router.post("/clients/{client_profile_id}/deactivate")
 def deactivate_admin_client(
     client_profile_id: int,
-    current_user: User = Depends(require_role(UserRole.ADMIN.value)),
+    current_user: User = Depends(require_permission_group("super_admin")),
     db: Session = Depends(get_db),
 ):
     profile = db.get(ClientProfile, client_profile_id)
@@ -778,7 +784,7 @@ def update_admin_worker(
 
 @router.get("/admin-users")
 def list_admin_users(
-    current_user: User = Depends(require_role(UserRole.ADMIN.value)),
+    current_user: User = Depends(require_permission_group("super_admin")),
     db: Session = Depends(get_db),
 ):
     users = db.execute(

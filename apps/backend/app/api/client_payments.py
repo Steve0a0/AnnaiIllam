@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.roles import require_role
@@ -13,6 +13,7 @@ from app.repositories.payment_repository import (
     create_client_payment,
     get_client_payment_by_id,
     get_client_payment_by_gateway_order_id,
+    get_client_payments_by_client_id,
     get_client_payments_by_requirement_id,
 )
 from app.repositories.profile_repository import get_client_profile_by_user_id
@@ -175,6 +176,50 @@ def create_client_payment_order(
     )
 
 
+@router.get("")
+def list_all_my_payments(
+    current_user: User = Depends(require_role(UserRole.CLIENT.value)),
+    db: Session = Depends(get_db),
+):
+    """Return all payments for the current client, enriched with requirement info."""
+    from sqlalchemy import select as _sel
+    from app.models.requirement import Requirement
+
+    client_profile = get_client_profile_by_user_id(db, current_user.id)
+    if not client_profile:
+        raise HTTPException(status_code=404, detail="Client profile not found")
+
+    payments = get_client_payments_by_client_id(db, client_profile.id)
+
+    req_ids = {p.requirement_id for p in payments}
+    reqs: dict = {}
+    if req_ids:
+        for r in db.execute(
+            _sel(Requirement).where(Requirement.id.in_(req_ids))
+        ).scalars().all():
+            reqs[r.id] = r
+
+    data = []
+    for p in payments:
+        req = reqs.get(p.requirement_id)
+        data.append({
+            "id": p.id,
+            "requirement_id": p.requirement_id,
+            "job_name": req.category if req else None,
+            "location": f"{req.city}, {req.state}" if req else None,
+            "duration_days": req.duration_days if req else None,
+            "amount": p.amount,
+            "payment_model": p.payment_model,
+            "payment_mode": p.payment_mode,
+            "payment_status": p.payment_status,
+            "reference_note": p.reference_note,
+            "paid_at": p.paid_at.isoformat() if p.paid_at else None,
+            "created_at": p.created_at.isoformat(),
+        })
+
+    return success_response("Payments fetched successfully", data)
+
+
 @router.get("/requirement/{requirement_id}")
 def list_client_payments_for_requirement(
     requirement_id: int,
@@ -208,6 +253,63 @@ def list_client_payments_for_requirement(
     ]
 
     return success_response("Client payments fetched successfully", data)
+
+
+@router.get("/{payment_id}/invoice.html")
+def view_client_payment_invoice(
+    payment_id: int,
+    current_user: User = Depends(require_role(UserRole.CLIENT.value)),
+    db: Session = Depends(get_db),
+):
+    """Return a styled HTML invoice for a confirmed payment (for in-app WebView)."""
+    from app.services.email_service import _build_invoice_html, _format_date
+
+    client_profile = get_client_profile_by_user_id(db, current_user.id)
+    if not client_profile:
+        raise HTTPException(status_code=404, detail="Client profile not found")
+
+    payment = get_client_payment_by_id(db, payment_id)
+    if not payment or payment.client_id != client_profile.id:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    if payment.payment_status != "paid":
+        raise HTTPException(status_code=404, detail="Invoice only available for confirmed payments")
+
+    requirement = get_requirement_by_id(db, payment.requirement_id)
+    if not requirement:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+
+    client_name = (
+        getattr(client_profile, "contact_name", None)
+        or getattr(client_profile, "company_name", None)
+        or current_user.phone
+    )
+    payment_date = (
+        payment.paid_at.strftime("%d %b %Y")
+        if payment.paid_at
+        else payment.created_at.strftime("%d %b %Y")
+    )
+    start_date_str = _format_date(
+        requirement.start_date.isoformat() if requirement.start_date else ""
+    )
+
+    html = _build_invoice_html(
+        invoice_number=f"INV-{payment.id:05d}",
+        payment_date=payment_date,
+        client_name=client_name,
+        requirement_category=requirement.category or "Service",
+        requirement_subcategory=getattr(requirement, "subcategory", None),
+        work_location=requirement.work_location or "",
+        city=requirement.city or "",
+        state=requirement.state or "",
+        start_date=start_date_str,
+        duration_days=requirement.duration_days,
+        payment_model=payment.payment_model,
+        amount=payment.amount,
+        reference_note=payment.reference_note,
+    )
+
+    return Response(content=html, media_type="text/html")
 
 
 @router.get("/{payment_id}/receipt")
@@ -322,6 +424,7 @@ def submit_reference_payment(
 @router.post("/verify")
 def verify_razorpay_payment(
     payload: VerifyRazorpayPaymentSchema,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(require_role(UserRole.CLIENT.value)),
     db: Session = Depends(get_db),
 ):
@@ -383,6 +486,32 @@ def verify_razorpay_payment(
             requirement.status = RequirementStatus.COMPLETED.value
 
     db.commit()
+
+    # Send invoice email in background
+    try:
+        from app.services.email_service import send_payment_invoice
+        to_email = client_profile.email or current_user.email
+        if to_email and requirement:
+            client_name = client_profile.company_name or client_profile.contact_name or "Valued Client"
+            background_tasks.add_task(
+                send_payment_invoice,
+                to_email=to_email,
+                client_name=client_name,
+                payment_id=payment.id,
+                payment_date=payment.paid_at or payment.updated_at,
+                payment_model=payment.payment_model,
+                amount=payment.amount,
+                reference_note=payment.reference_note,
+                requirement_category=requirement.category,
+                requirement_subcategory=requirement.subcategory,
+                work_location=requirement.work_location,
+                city=requirement.city,
+                state=requirement.state,
+                start_date=str(requirement.start_date) if requirement.start_date else "",
+                duration_days=requirement.duration_days or 1,
+            )
+    except Exception:
+        logger.exception("Failed to enqueue invoice email for payment #%s", payment.id)
 
     audit_event(
         "client_payment_verified",

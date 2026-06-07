@@ -5,13 +5,11 @@ Returns the list of client_profile_ids accessible to the current admin:
 - regular admin  → list of assigned client_profile_ids (may be empty)
 """
 from fastapi import Depends
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.roles import require_role
 from app.core.roles import UserRole
 from app.db.deps import get_db
-from app.models.admin_client_assignment import AdminClientAssignment
 from app.models.user import User
 
 
@@ -30,8 +28,6 @@ def get_accessible_client_ids(
     if profile and profile.permission_group == "super_admin":
         return None  # unrestricted
 
-    # Regular admin — return only assigned clients
-    stmt = select(AdminClientAssignment.client_profile_id).where(
-        AdminClientAssignment.admin_user_id == current_user.id
-    )
-    return list(db.execute(stmt).scalars().all())
+    # ops_admin — unrestricted view of all clients (per permissions matrix)
+    # Client assignments track responsibility but do not gate visibility.
+    return None

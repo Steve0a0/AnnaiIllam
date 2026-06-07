@@ -137,7 +137,7 @@ def admin_user(db):
 @pytest.fixture
 def client_user(db):
     user = User(
-        phone="9000000002",
+        phone="+919000000002",
         email="client@annai-illam.test",
         role="client",
         is_active=True,
@@ -152,7 +152,7 @@ def client_user(db):
 @pytest.fixture
 def worker_user(db):
     user = User(
-        phone="9000000003",
+        phone="+919000000003",
         role="worker",
         is_active=True,
         is_phone_verified=True,

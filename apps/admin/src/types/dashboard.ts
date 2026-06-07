@@ -20,6 +20,13 @@ export type DashboardSummaryResponse = {
 };
 
 export type DashboardAlertsData = {
+  open_complaints: Array<{
+    id: number;
+    requirement_id: number;
+    severity: string;
+    status: string;
+    created_at: string;
+  }>;
   overdue_complaints: Array<{
     id: number;
     requirement_id: number;

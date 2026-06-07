@@ -6,13 +6,14 @@ import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
-  BriefcaseBusiness,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
   ClipboardCheck,
   CreditCard,
   FileText,
   MapPin,
+  MoreHorizontal,
   Send,
   TrendingUp,
   Users,
@@ -26,17 +27,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useRequirementDetail } from "@/features/requirements/use-requirement-detail";
 import RequirementsLoading from "@/features/requirements/requirements-loading";
 import RequirementsError from "@/features/requirements/requirements-error";
 import StatusBadge from "@/components/shared/status-badge";
-import MarkUnderReviewButton from "@/features/requirements/mark-under-review-button";
 import CreateQuoteForm from "@/features/requirements/create-quote-form";
-import CreateAssignmentForm from "@/features/assignments/create-assignment-form";
-import RequirementAssignmentsList, { type ReplacementHint } from "@/features/assignments/requirement-assignments-list";
+import RequirementAssignmentsList from "@/features/assignments/requirement-assignments-list";
 import CoverageCalendar from "@/features/assignments/coverage-calendar";
 import WorkerPaymentsSection from "@/features/requirements/worker-payments-section";
-import DisbursementsSection from "@/features/requirements/disbursements-section";
 import { requirementsService } from "@/services/requirements.service";
 import { financeService } from "@/services/finance.service";
 import { assignmentsService } from "@/services/assignments.service";
@@ -68,9 +73,8 @@ export default function RequirementDetailView({
     useRequirementDetail(requirementId);
 
   const [showQuoteForm, setShowQuoteForm] = useState(false);
-  const [showAssignmentDialog, setShowAssignmentDialog] = useState(false);
-  const [replacementHint, setReplacementHint] = useState<ReplacementHint | null>(null);
   const [completing, setCompleting] = useState(false);
+  const [underReviewLoading, setUnderReviewLoading] = useState(false);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [rejectReasonError, setRejectReasonError] = useState("");
@@ -112,11 +116,28 @@ export default function RequirementDetailView({
     requirement.status === "under_review" || requirement.status === "quoted";
   const canCancel = !["completed", "rejected", "cancelled"].includes(requirement.status);
   const statusAllowsAssignment = ASSIGNABLE_STATUSES.has(requirement.status);
-  const canAssignWorkers = statusAllowsAssignment && hasPaidPayment;
-  const awaitingPayment = statusAllowsAssignment && !hasPaidPayment;
+  const advanceRequired = (requirement.quote?.advance_amount ?? 0) > 0;
+  const canAssignWorkers = statusAllowsAssignment && (!advanceRequired || hasPaidPayment);
+  const awaitingPayment = statusAllowsAssignment && advanceRequired && !hasPaidPayment;
   const canMarkComplete = requirement.status === "in_progress";
   const canRequestExtension =
     requirement.status === "in_progress" || requirement.status === "workers_assigned";
+
+  const isEarlyStage = ["submitted", "under_review", "quoted"].includes(requirement.status);
+  const isMidStage = ["approved", "workers_assigned", "in_progress"].includes(requirement.status);
+  const isEndStage = requirement.status === "completed";
+
+  const handleMarkUnderReview = async () => {
+    try {
+      setUnderReviewLoading(true);
+      await requirementsService.markRequirementUnderReview(requirement.id);
+      refetch();
+    } catch {
+      // silent — status refetch handles state
+    } finally {
+      setUnderReviewLoading(false);
+    }
+  };
 
   const handleMarkComplete = async () => {
     try {
@@ -209,14 +230,14 @@ export default function RequirementDetailView({
 
         <div className="mt-5 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
           <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
-              Requests / REQ-{requirement.id}
-            </p>
-            <div className="mt-2 flex flex-wrap items-center gap-3">
-              <h1 className="font-display text-3xl font-semibold tracking-[-0.02em] text-foreground">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">
                 {formatLabel(requirement.category)} Requirement
               </h1>
               <StatusBadge value={requirement.status} />
+              <span className="rounded-full bg-[#EDFAF3] px-2.5 py-1 font-mono text-xs font-medium text-[#1A6640]">
+                REQ-{requirement.id}
+              </span>
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
               <span className="inline-flex items-center gap-1.5">
@@ -225,7 +246,7 @@ export default function RequirementDetailView({
               </span>
               <span className="inline-flex items-center gap-1.5 font-mono">
                 <CalendarDays className="size-4" />
-                {formatDate(requirement.start_date)}
+                {formatDate(requirement.start_date)} · {requirement.duration_days} days
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <Users className="size-4" />
@@ -234,107 +255,68 @@ export default function RequirementDetailView({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-start gap-3">
-            {canMarkUnderReview ? (
-              <MarkUnderReviewButton
-                requirementId={requirement.id}
-                onSuccess={() => refetch()}
-              />
-            ) : null}
-            {canCreateQuote ? (
-              <Button
-                onClick={() => setShowQuoteForm((prev) => !prev)}
-                variant="accent"
-              >
-                {showQuoteForm ? "Close Quote Form" : "Create Quote"}
+          {/* Primary CTA + overflow menu */}
+          <div className="flex shrink-0 items-center gap-2">
+            {canMarkUnderReview && (
+              <Button variant="accent" onClick={handleMarkUnderReview} disabled={underReviewLoading}>
+                {underReviewLoading ? "Moving…" : "Mark under review"}
               </Button>
-            ) : null}
-            {canReject ? (
-              <Button
-                onClick={() => setShowRejectDialog(true)}
-                variant="destructive"
-              >
-                <XCircle className="mr-1.5 size-4" />
-                Reject
+            )}
+            {canCreateQuote && (
+              <Button variant="accent" onClick={() => setShowQuoteForm((prev) => !prev)}>
+                {showQuoteForm ? "Close quote form" : "Send quote"}
               </Button>
-            ) : null}
-            {canCancel ? (
-              <Button
-                onClick={() => setShowCancelDialog(true)}
-                variant="outline"
-                className="border-red-300 text-red-700 hover:bg-red-50"
-              >
-                <XCircle className="mr-1.5 size-4" />
-                Cancel
+            )}
+            {canAssignWorkers && !canMarkComplete && (
+              <Button variant="accent" onClick={() => {}}>
+                Assign workers
               </Button>
-            ) : null}
-            {canRequestExtension ? (
-              <Button
-                onClick={() => setShowExtensionDialog(true)}
-                variant="secondary"
-              >
-                <CalendarDays className="mr-1.5 size-4" />
-                Request Extension
-              </Button>
-            ) : null}
-            {canMarkComplete ? (
-              <Button
-                onClick={handleMarkComplete}
-                disabled={completing}
-                variant="accent"
-              >
+            )}
+            {canMarkComplete && (
+              <Button variant="accent" onClick={handleMarkComplete} disabled={completing}>
                 <CheckCircle2 className="mr-1.5 size-4" />
-                {completing ? "Completing…" : "Mark Complete"}
+                {completing ? "Completing…" : "Mark complete"}
               </Button>
-            ) : null}
+            )}
+            {(canRequestExtension || canReject || canCancel) && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon" className="size-9">
+                    <MoreHorizontal className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  {canRequestExtension && (
+                    <DropdownMenuItem onClick={() => setShowExtensionDialog(true)}>
+                      Request extension
+                    </DropdownMenuItem>
+                  )}
+                  {canRequestExtension && (canReject || canCancel) && <DropdownMenuSeparator />}
+                  {canReject && (
+                    <DropdownMenuItem
+                      onClick={() => setShowRejectDialog(true)}
+                      className="text-destructive focus:text-destructive"
+                    >
+                      Reject request
+                    </DropdownMenuItem>
+                  )}
+                  {canCancel && (
+                    <DropdownMenuItem
+                      onClick={() => setShowCancelDialog(true)}
+                      className="text-destructive focus:text-destructive"
+                    >
+                      Cancel requirement
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
       </header>
 
-      {awaitingPayment && (
-        <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-4">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-red-100">
-            <CreditCard className="size-5 text-red-600" />
-          </div>
-          <div className="flex-1">
-            <p className="font-semibold text-red-800">Advance payment not confirmed</p>
-            <p className="mt-0.5 text-sm text-red-700">
-              The client has approved the quote but the advance payment has not been marked paid yet.
-              Worker assignment is locked until payment is confirmed in Finance.
-            </p>
-          </div>
-          <Link
-            href="/finance"
-            className="shrink-0 rounded-lg bg-red-100 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-200"
-          >
-            Go to Finance →
-          </Link>
-        </div>
-      )}
-
-      {requirement.status === "rejected" && requirement.rejection_reason && (
-        <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-4">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-red-100">
-            <XCircle className="size-5 text-red-600" />
-          </div>
-          <div>
-            <p className="font-semibold text-red-800">Requirement rejected</p>
-            <p className="mt-0.5 text-sm text-red-700">{requirement.rejection_reason}</p>
-          </div>
-        </div>
-      )}
-
-      {requirement.status === "cancelled" && requirement.cancellation_reason && (
-        <div className="flex items-start gap-3 rounded-xl border border-orange-200 bg-orange-50 px-4 py-4">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-orange-100">
-            <XCircle className="size-5 text-orange-600" />
-          </div>
-          <div>
-            <p className="font-semibold text-orange-800">Requirement cancelled</p>
-            <p className="mt-0.5 text-sm text-orange-700">{requirement.cancellation_reason}</p>
-          </div>
-        </div>
-      )}
+      {/* Phase banner — single contextual strip */}
+      <PhaseBanner requirement={requirement} awaitingPayment={awaitingPayment} />
 
       {/* Reject dialog */}
       <Dialog open={showRejectDialog} onOpenChange={setShowRejectDialog}>
@@ -507,170 +489,228 @@ export default function RequirementDetailView({
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
         <main className="space-y-6">
-          <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <p className="text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
-                  Request info
-                </p>
-                <h2 className="mt-2 font-display text-xl font-semibold text-foreground">
-                  Manpower requirement details
-                </h2>
-              </div>
-              <div className="rounded-full bg-[#EDFAF3] px-3 py-1 font-mono text-xs font-medium text-[#1A6640]">
-                REQ-{requirement.id}
-              </div>
-            </div>
-
-            <div className="mt-6 grid gap-4 md:grid-cols-2">
-              <DetailItem label="Category" value={formatLabel(requirement.category)} />
-              <DetailItem
-                label="Subcategory"
-                value={requirement.subcategory ? formatLabel(requirement.subcategory) : "-"}
-              />
-              <DetailItem
-                label="Workers needed"
-                value={requirement.number_of_workers}
-                mono
-              />
-              <DetailItem label="Work location" value={requirement.work_location} />
-              <DetailItem label="City" value={requirement.city} />
-              <DetailItem label="State" value={requirement.state} />
-              <DetailItem
-                label="Start date"
-                value={formatDate(requirement.start_date)}
-                mono
-              />
-              <DetailItem
-                label="Duration"
-                value={`${requirement.duration_days} days`}
-                mono
-              />
-              <DetailItem label="Shift" value={requirement.shift_details || "-"} />
-              <DetailItem
-                label="Food at site"
-                value={requirement.food_required ? "Required" : "Not required"}
-              />
-              <DetailItem
-                label="Accommodation"
-                value={
-                  requirement.accommodation_required
-                    ? "Required"
-                    : "Not required"
-                }
-              />
-              <DetailItem
-                label="Geofence check-in"
-                value={requirement.require_geofence ? "Required" : "Not required"}
-              />
-              <DetailItem
-                label="Client budget"
-                value={
-                  requirement.budget_amount
-                    ? `Rs. ${requirement.budget_amount.toLocaleString("en-IN")}`
-                    : "-"
-                }
-                mono
-              />
-            </div>
-
-            <div className="mt-6 border-t border-border pt-5">
-              <p className="text-sm font-medium text-foreground">Notes</p>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                {requirement.notes || "No notes provided."}
-              </p>
-            </div>
-          </section>
-
-          <QuoteSummary quote={requirement.quote} />
-
-          <InterestedWorkers requirementId={requirement.id} />
-
-          {showQuoteForm ? (
-            <CreateQuoteForm
-              requirement={requirement}
-              onSuccess={() => {
-                setShowQuoteForm(false);
-                refetch();
-              }}
-            />
-          ) : null}
-
-          <section className="space-y-4">
-            <SectionHeader
-              eyebrow="Worker assignment"
-              title="Assignments"
-              description="Track assigned workers first, then add another worker only when the request still needs coverage."
-            />
-
-              <RequirementAssignmentsList
-                requirementId={requirement.id}
-                requiredWorkers={requirement.number_of_workers}
-                canAddWorkers={canAssignWorkers}
-                onAddWorkers={() => { setReplacementHint(null); setShowAssignmentDialog(true); }}
-                onReplace={(hint) => { setReplacementHint(hint); setShowAssignmentDialog(true); }}
-              />
-
-            {["workers_assigned", "in_progress", "completed"].includes(requirement.status) && (
-              <CoverageCalendar
-                requirementId={requirement.id}
-                requiredPerDay={requirement.number_of_workers}
-              />
-            )}
-
-            {canAssignWorkers ? (
-              <Dialog
-                open={showAssignmentDialog}
-                onOpenChange={setShowAssignmentDialog}
-              >
-                <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
-                  <DialogHeader>
-                    <DialogTitle>Add workers to requirement</DialogTitle>
-                    <DialogDescription>
-                      Select one or more approved, available workers and
-                      apply the same role, shift, and optional payout to the
-                      batch.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <CreateAssignmentForm
-                    requirement={requirement}
-                    requirementId={requirement.id}
-                    replacementHint={replacementHint ?? undefined}
-                    onSuccess={() => {
-                      setShowAssignmentDialog(false);
-                      setReplacementHint(null);
-                      refetch();
-                    }}
-                  />
-                </DialogContent>
-              </Dialog>
-            ) : !awaitingPayment ? (
-              <NoticeCard>
-                Assign workers after the client approves the quote.
-              </NoticeCard>
-            ) : null}
-          </section>
-
-          {["workers_assigned", "in_progress", "completed"].includes(requirement.status) && (
-            <WorkerPaymentsSection requirementId={requirement.id} />
+          {/* Early stage: details → quote → interested workers → quote form */}
+          {isEarlyStage && (
+            <>
+              <RequestDetailsSection requirement={requirement} />
+              <QuoteSummary quote={requirement.quote} />
+              <InterestedWorkers requirementId={requirement.id} />
+              {showQuoteForm && (
+                <CreateQuoteForm
+                  requirement={requirement}
+                  onSuccess={() => { setShowQuoteForm(false); refetch(); }}
+                />
+              )}
+            </>
           )}
 
-          {requirement.status === "completed" && (
-            <InvoicesSection requirementId={requirement.id} />
+          {/* Mid stage: assignments first, then details + quote for reference */}
+          {isMidStage && (
+            <>
+              <section className="space-y-4">
+                <SectionHeader
+                  title="Assignments"
+                  description="Assign workers to cover the full duration of this requirement."
+                />
+                <RequirementAssignmentsList
+                  requirementId={requirement.id}
+                  requiredWorkers={requirement.number_of_workers}
+                />
+                <CoverageCalendar
+                  requirementId={requirement.id}
+                  requiredPerDay={requirement.number_of_workers}
+                  canAssign={canAssignWorkers}
+                />
+              </section>
+              {["workers_assigned", "in_progress"].includes(requirement.status) && (
+                <WorkerPaymentsSection requirementId={requirement.id} />
+              )}
+              <RequestDetailsSection requirement={requirement} defaultCollapsed />
+              <QuoteSummary quote={requirement.quote} />
+            </>
           )}
 
-          {requirement.status === "completed" && (
-            <DisbursementsSection requirementId={requirement.id} />
+          {/* End stage: invoices + disbursements first */}
+          {isEndStage && (
+            <>
+              <InvoicesSection requirementId={requirement.id} />
+              <WorkerPaymentsSection requirementId={requirement.id} />
+              <section className="space-y-4">
+                <SectionHeader title="Assignments" />
+                <RequirementAssignmentsList
+                  requirementId={requirement.id}
+                  requiredWorkers={requirement.number_of_workers}
+                />
+                <CoverageCalendar
+                  requirementId={requirement.id}
+                  requiredPerDay={requirement.number_of_workers}
+                />
+              </section>
+              <RequestDetailsSection requirement={requirement} defaultCollapsed />
+              <QuoteSummary quote={requirement.quote} />
+            </>
+          )}
+
+          {/* Closed states: just the details */}
+          {!isEarlyStage && !isMidStage && !isEndStage && (
+            <RequestDetailsSection requirement={requirement} />
           )}
         </main>
 
         <aside className="space-y-6 xl:sticky xl:top-6 xl:self-start">
-          <QuickInfoCard requirement={requirement} />
           <BudgetSummaryCard requirement={requirement} />
           <StatusTimeline status={requirement.status} quote={requirement.quote} />
         </aside>
       </div>
+
     </div>
+  );
+}
+
+// ─── PhaseBanner ────────────────────────────────────────────────────────────
+
+function PhaseBanner({
+  requirement,
+  awaitingPayment,
+}: {
+  requirement: AdminRequirementDetail;
+  awaitingPayment: boolean;
+}) {
+  if (requirement.status === "rejected" && requirement.rejection_reason) {
+    return (
+      <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-4">
+        <XCircle className="mt-0.5 size-5 shrink-0 text-red-600" />
+        <div>
+          <p className="font-semibold text-red-800">Requirement rejected</p>
+          <p className="mt-0.5 text-sm text-red-700">{requirement.rejection_reason}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (requirement.status === "cancelled" && requirement.cancellation_reason) {
+    return (
+      <div className="flex items-start gap-3 rounded-xl border border-orange-200 bg-orange-50 px-4 py-4">
+        <XCircle className="mt-0.5 size-5 shrink-0 text-orange-600" />
+        <div>
+          <p className="font-semibold text-orange-800">Requirement cancelled</p>
+          <p className="mt-0.5 text-sm text-orange-700">{requirement.cancellation_reason}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (awaitingPayment) {
+    return (
+      <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4">
+        <CreditCard className="mt-0.5 size-5 shrink-0 text-amber-600" />
+        <div className="flex-1">
+          <p className="font-semibold text-amber-800">Awaiting advance payment</p>
+          <p className="mt-0.5 text-sm text-amber-700">
+            The client has approved the quote but the advance payment is not confirmed yet.
+            Worker assignment is locked until payment is confirmed in Finance.
+          </p>
+        </div>
+        <Link
+          href="/finance"
+          className="shrink-0 rounded-lg bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-200"
+        >
+          Go to Finance →
+        </Link>
+      </div>
+    );
+  }
+
+  if (requirement.status === "submitted") {
+    return (
+      <div className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+        New request — review the details below then mark as under review to begin the quoting process.
+      </div>
+    );
+  }
+
+  if (requirement.status === "under_review") {
+    return (
+      <div className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+        Under review — create a quote to send to the client once ready.
+      </div>
+    );
+  }
+
+  if (requirement.status === "quoted") {
+    return (
+      <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+        Quote sent — waiting for client approval.
+      </div>
+    );
+  }
+
+  if (requirement.status === "approved") {
+    return (
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+        Client approved — assign workers below to begin the job.
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// ─── RequestDetailsSection ────────────────────────────────────────────────────
+
+function RequestDetailsSection({
+  requirement,
+  defaultCollapsed = false,
+}: {
+  requirement: AdminRequirementDetail;
+  defaultCollapsed?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(!defaultCollapsed);
+
+  return (
+    <section className="rounded-xl border border-border bg-card p-6">
+      <div className="flex items-center justify-between gap-4">
+        <h2 className="text-lg font-semibold text-foreground">Request details</h2>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          {expanded ? "Show less" : "Show all"}
+          <ChevronDown className={`size-3.5 transition-transform ${expanded ? "rotate-180" : ""}`} />
+        </button>
+      </div>
+
+      <div className="mt-5 grid gap-4 md:grid-cols-2">
+        <DetailItem label="Category" value={formatLabel(requirement.category)} />
+        <DetailItem label="Subcategory" value={requirement.subcategory ? formatLabel(requirement.subcategory) : "—"} />
+        <DetailItem label="Workers needed" value={requirement.number_of_workers} mono />
+        <DetailItem label="Work location" value={requirement.work_location} />
+        <DetailItem label="Start date" value={formatDate(requirement.start_date)} mono />
+        <DetailItem label="Duration" value={`${requirement.duration_days} days`} mono />
+      </div>
+
+      {expanded && (
+        <div className="mt-4 grid gap-4 border-t border-border pt-4 md:grid-cols-2">
+          <DetailItem label="City" value={requirement.city} />
+          <DetailItem label="State" value={requirement.state} />
+          <DetailItem label="Shift" value={requirement.shift_details || "—"} />
+          <DetailItem label="Food at site" value={requirement.food_required ? "Required" : "Not required"} />
+          <DetailItem label="Accommodation" value={requirement.accommodation_required ? "Required" : "Not required"} />
+          <DetailItem label="Geofence check-in" value={requirement.require_geofence ? "Required" : "Not required"} />
+          {requirement.budget_amount && (
+            <DetailItem label="Client budget" value={`Rs. ${requirement.budget_amount.toLocaleString("en-IN")}`} mono />
+          )}
+        </div>
+      )}
+
+      {expanded && requirement.notes && (
+        <div className="mt-4 border-t border-border pt-4">
+          <p className="text-xs text-muted-foreground">Notes</p>
+          <p className="mt-1.5 text-sm leading-6 text-foreground">{requirement.notes}</p>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -693,18 +733,12 @@ function QuoteSummary({
     new Date(quote.valid_until) < new Date(new Date().toDateString());
 
   return (
-    <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
+    <section className="rounded-xl border border-border bg-card p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
-            Quote
-          </p>
-          <h2 className="mt-2 font-display text-xl font-semibold text-foreground">
-            Client-facing estimate
-          </h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Quote details waiting for approval or already decided by the
-            client.
+          <h2 className="text-lg font-semibold text-foreground">Quote</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Client-facing estimate details.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -737,15 +771,6 @@ function QuoteSummary({
           value={quote.total_worker_days ?? "-"}
           mono
         />
-        <DetailItem
-          label="Advance amount"
-          value={
-            quote.advance_amount
-              ? `Rs. ${quote.advance_amount.toLocaleString("en-IN")}`
-              : "-"
-          }
-          mono
-        />
         <DetailItem label="Payment model" value={formatLabel(quote.payment_model)} />
         <DetailItem
           label="Valid until"
@@ -754,6 +779,23 @@ function QuoteSummary({
         />
       </div>
 
+      {quote.advance_amount ? (
+        <div className="mt-4 rounded-lg border border-border bg-muted/40 p-4 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Quoted total</span>
+            <span className="font-mono font-semibold">Rs. {quote.quoted_amount.toLocaleString("en-IN")}</span>
+          </div>
+          <div className="mt-2 flex items-center justify-between text-amber-700">
+            <span>− Advance due from client</span>
+            <span className="font-mono font-semibold">Rs. {quote.advance_amount.toLocaleString("en-IN")}</span>
+          </div>
+          <div className="mt-2 flex items-center justify-between border-t border-border pt-2 font-semibold">
+            <span>Balance after advance</span>
+            <span className="font-mono">Rs. {(quote.quoted_amount - quote.advance_amount).toLocaleString("en-IN")}</span>
+          </div>
+        </div>
+      ) : null}
+
       {quote.terms_notes ? (
         <TextBlock label="Terms notes" value={quote.terms_notes} />
       ) : null}
@@ -761,47 +803,6 @@ function QuoteSummary({
       {quote.internal_notes ? (
         <TextBlock label="Internal notes" value={quote.internal_notes} />
       ) : null}
-    </section>
-  );
-}
-
-function QuickInfoCard({
-  requirement,
-}: {
-  requirement: AdminRequirementDetail;
-}) {
-  return (
-    <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-      <div className="flex items-center gap-3">
-        <div className="flex size-10 items-center justify-center rounded-lg bg-[#EDFAF3] text-[#1A6640]">
-          <BriefcaseBusiness className="size-5" />
-        </div>
-        <div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
-            Quick info
-          </p>
-          <h2 className="font-display text-lg font-semibold text-foreground">
-            Request summary
-          </h2>
-        </div>
-      </div>
-
-      <div className="mt-5 space-y-4">
-        <CompactInfo label="Status" value={<StatusBadge value={requirement.status} />} />
-        <CompactInfo
-          label="Worker days"
-          value={`${requirement.number_of_workers * requirement.duration_days}`}
-          mono
-        />
-        <CompactInfo
-          label="Location"
-          value={`${requirement.city}, ${requirement.state}`}
-        />
-        <CompactInfo
-          label="Shift"
-          value={requirement.shift_details || "Not specified"}
-        />
-      </div>
     </section>
   );
 }
@@ -820,40 +821,33 @@ function StatusTimeline({
   );
 
   return (
-    <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+    <section className="rounded-xl border border-border bg-card p-5">
       <div className="flex items-center gap-3">
-        <div className="flex size-10 items-center justify-center rounded-lg bg-[#F5F3FF] text-[#6D28D9]">
-          <ClipboardCheck className="size-5" />
+        <div className="flex size-9 items-center justify-center rounded-lg bg-[#F5F3FF] text-[#6D28D9]">
+          <ClipboardCheck className="size-4" />
         </div>
-        <div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
-            Status timeline
-          </p>
-          <h2 className="font-display text-lg font-semibold text-foreground">
-            Request progress
-          </h2>
-        </div>
+        <h2 className="text-base font-semibold text-foreground">Request progress</h2>
       </div>
 
-      <ol className="mt-6 space-y-0">
+      <ol className="mt-5 space-y-0">
         {TIMELINE_STEPS.map((step, index) => {
           const isComplete = index < activeIndex;
           const isCurrent = index === activeIndex;
-          const nodeClass = isComplete || isCurrent
-            ? "bg-[#1A6640]"
-            : "bg-[#D6D3D1]";
+          const isFuture = index > activeIndex;
 
           return (
             <li key={step.status} className="relative flex gap-3 pb-5 last:pb-0">
               {index < TIMELINE_STEPS.length - 1 ? (
-                <span className="absolute left-[5px] top-4 h-full w-0.5 bg-border" />
+                <span className={`absolute left-[5px] top-4 h-full w-0.5 ${isComplete ? "bg-[#1A6640]" : "bg-border"}`} />
               ) : null}
               <span
-                className={`relative z-10 mt-1 size-3 rounded-full ${nodeClass} ${
-                  isCurrent ? "ring-4 ring-[#D4F0E3]" : ""
+                className={`relative z-10 mt-1 size-3 shrink-0 rounded-full ${
+                  isComplete ? "bg-[#1A6640]"
+                  : isCurrent ? "bg-[#1A6640] ring-4 ring-[#D4F0E3]"
+                  : "bg-border"
                 }`}
               />
-              <span>
+              <span className={isFuture ? "opacity-40" : ""}>
                 <span className="block text-sm font-medium text-foreground">
                   {step.label}
                 </span>
@@ -885,23 +879,16 @@ function normalizeTimelineStatus(
 }
 
 function SectionHeader({
-  eyebrow,
   title,
   description,
 }: {
-  eyebrow: string;
   title: string;
-  description: string;
+  description?: string;
 }) {
   return (
     <div>
-      <p className="text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
-        {eyebrow}
-      </p>
-      <h2 className="mt-2 font-display text-xl font-semibold text-foreground">
-        {title}
-      </h2>
-      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+      {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
     </div>
   );
 }
@@ -917,11 +904,9 @@ function DetailItem({
 }) {
   return (
     <div>
-      <p className="text-xs font-medium uppercase tracking-[0.02em] text-muted-foreground">
-        {label}
-      </p>
+      <p className="text-xs text-muted-foreground">{label}</p>
       <p
-        className={`mt-1 text-sm text-foreground ${
+        className={`mt-1 text-sm font-medium text-foreground ${
           mono ? "font-mono" : ""
         }`}
       >
@@ -956,9 +941,9 @@ function CompactInfo({
 
 function TextBlock({ label, value }: { label: string; value: string }) {
   return (
-    <div className="mt-6 border-t border-border pt-5">
-      <p className="text-sm font-medium text-foreground">{label}</p>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">{value}</p>
+    <div className="mt-4 border-t border-border pt-4">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1.5 text-sm leading-6 text-foreground">{value}</p>
     </div>
   );
 }
@@ -973,22 +958,19 @@ function InterestedWorkers({ requirementId }: { requirementId: number }) {
 
   if (isLoading) {
     return (
-      <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
+      <section className="rounded-xl border border-border bg-card p-6">
         <p className="text-sm text-muted-foreground">Loading interested workers…</p>
       </section>
     );
   }
 
+  if (interests.length === 0) return null;
+
   return (
-    <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
+    <section className="rounded-xl border border-border bg-card p-6">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
-            Worker interest
-          </p>
-          <h2 className="mt-2 font-display text-xl font-semibold text-foreground">
-            Interested workers
-          </h2>
+          <h2 className="text-lg font-semibold text-foreground">Interested workers</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Workers who expressed interest via the mobile app.
           </p>
@@ -998,17 +980,11 @@ function InterestedWorkers({ requirementId }: { requirementId: number }) {
         </span>
       </div>
 
-      {interests.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No workers have expressed interest yet.
-        </p>
-      ) : (
-        <div className="divide-y divide-border">
-          {interests.map((item) => (
-            <InterestedWorkerRow key={item.interest_id} item={item} />
-          ))}
-        </div>
-      )}
+      <div className="divide-y divide-border">
+        {interests.map((item) => (
+          <InterestedWorkerRow key={item.interest_id} item={item} />
+        ))}
+      </div>
     </section>
   );
 }
@@ -1069,6 +1045,12 @@ function BudgetSummaryCard({
     enabled: !!requirement.id,
   });
 
+  const { data: paymentsData } = useQuery({
+    queryKey: ["requirement-payments", requirement.id],
+    queryFn: () => financeService.getClientPaymentsByRequirement(requirement.id),
+    enabled: !!requirement.id,
+  });
+
   const assignments = data?.data ?? [];
   const activeStatuses = new Set(["assigned", "accepted", "active", "completed"]);
 
@@ -1085,29 +1067,40 @@ function BudgetSummaryCard({
     totalAssignedCost += a.salary_amount * days;
   }
 
+  const payments = paymentsData?.data ?? [];
+  const totalPaid = payments
+    .filter((p) => p.payment_status === "paid")
+    .reduce((s, p) => s + p.amount, 0);
+  const isAdvancePaid = totalPaid > 0;
+
   const budget = requirement.budget_amount;
   const quoted = requirement.quote?.quoted_amount ?? null;
+  const advance = requirement.quote?.advance_amount ?? null;
   const isOver = budget !== null && totalAssignedCost > budget;
 
+  const utilizationPct =
+    quoted && totalAssignedCost > 0
+      ? Math.min(100, Math.round((totalAssignedCost / quoted) * 100))
+      : null;
+
+  const marginBarColor =
+    utilizationPct === null ? ""
+    : utilizationPct >= 95 ? "bg-red-500"
+    : utilizationPct >= 80 ? "bg-amber-400"
+    : "bg-emerald-500";
+
   return (
-    <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+    <section className="rounded-xl border border-border bg-card p-5">
       <div className="flex items-center gap-3">
-        <div className="flex size-10 items-center justify-center rounded-lg bg-[#EFF6FF] text-[#1D4ED8]">
-          <TrendingUp className="size-5" />
+        <div className="flex size-9 items-center justify-center rounded-lg bg-[#EFF6FF] text-[#1D4ED8]">
+          <TrendingUp className="size-4" />
         </div>
-        <div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
-            Cost tracker
-          </p>
-          <h2 className="font-display text-lg font-semibold text-foreground">
-            Budget vs. cost
-          </h2>
-        </div>
+        <h2 className="text-base font-semibold text-foreground">Budget tracker</h2>
       </div>
 
       <div className="mt-5 space-y-4">
         <CompactInfo
-          label="Assigned worker cost"
+          label="Worker cost"
           value={
             totalAssignedCost > 0
               ? `Rs. ${totalAssignedCost.toLocaleString("en-IN")}`
@@ -1117,24 +1110,66 @@ function BudgetSummaryCard({
         />
         {quoted !== null && (
           <CompactInfo
-            label="Client quoted total"
+            label="Client quoted"
             value={`Rs. ${quoted.toLocaleString("en-IN")}`}
             mono
           />
         )}
+        {quoted !== null && advance !== null && (
+          <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">Advance</span>
+                {isAdvancePaid ? (
+                  <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                    Paid
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                    Pending
+                  </span>
+                )}
+              </span>
+              <span className={`font-mono font-semibold ${isAdvancePaid ? "text-emerald-700 line-through decoration-emerald-400" : "text-amber-700"}`}>
+                Rs. {advance.toLocaleString("en-IN")}
+              </span>
+            </div>
+            <div className="flex items-center justify-between border-t border-border pt-1.5 font-medium">
+              <span className="text-muted-foreground">Balance after advance</span>
+              <span className="font-mono">Rs. {(quoted - advance).toLocaleString("en-IN")}</span>
+            </div>
+          </div>
+        )}
         {budget !== null && (
           <CompactInfo
-            label="Client stated budget"
+            label="Client budget"
             value={`Rs. ${budget.toLocaleString("en-IN")}`}
             mono
           />
         )}
-        {quoted !== null && totalAssignedCost > 0 && (
-          <CompactInfo
-            label="Margin (quoted − worker cost)"
-            value={`Rs. ${(quoted - totalAssignedCost).toLocaleString("en-IN")}`}
-            mono
-          />
+
+        {/* Margin utilization bar */}
+        {utilizationPct !== null && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Margin utilization</span>
+              <span className="font-mono font-medium">{utilizationPct}%</span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className={`h-full rounded-full transition-all ${marginBarColor}`}
+                style={{ width: `${utilizationPct}%` }}
+              />
+            </div>
+            {quoted && totalAssignedCost > 0 && (
+              <p
+                className="text-xs font-medium"
+                style={{ color: utilizationPct >= 95 ? "#B91C1C" : utilizationPct >= 80 ? "#B45309" : "#15803D" }}
+              >
+                Margin: Rs. {(quoted - totalAssignedCost).toLocaleString("en-IN")}
+              </p>
+            )}
+          </div>
         )}
       </div>
 
@@ -1149,16 +1184,14 @@ function BudgetSummaryCard({
 
 function NoticeCard({
   children,
-  variant = "warning",
 }: {
   children: ReactNode;
-  variant?: "warning" | "payment";
 }) {
-  const cls =
-    variant === "payment"
-      ? "rounded-xl border-l-4 border-l-[#B91C1C] border-y border-r border-[#FEE2E2] bg-[#FFF5F5] px-4 py-3 text-sm text-[#B91C1C]"
-      : "rounded-xl border-l-4 border-l-[#B45309] border-y border-r border-[#FEF3C7] bg-[#FFFBEB] px-4 py-3 text-sm text-[#B45309]";
-  return <div className={cls}>{children}</div>;
+  return (
+    <div className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+      {children}
+    </div>
+  );
 }
 
 function InvoicesSection({ requirementId }: { requirementId: number }) {
@@ -1201,18 +1234,13 @@ function InvoicesSection({ requirementId }: { requirementId: number }) {
   };
 
   return (
-    <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
+    <section className="rounded-xl border border-border bg-card p-6">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#DBEAFE] text-[#1D4ED8]">
-            <FileText className="size-5" />
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#DBEAFE] text-[#1D4ED8]">
+            <FileText className="size-4" />
           </div>
-          <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
-              Billing
-            </p>
-            <h2 className="font-display text-xl font-semibold text-foreground">Invoices</h2>
-          </div>
+          <h2 className="text-lg font-semibold text-foreground">Invoices</h2>
         </div>
         {!hasActiveInvoice && (
           <Button
@@ -1222,7 +1250,7 @@ function InvoicesSection({ requirementId }: { requirementId: number }) {
             onClick={handleGenerate}
           >
             <FileText className="size-4" />
-            {generating ? "Generating…" : "Generate Invoice"}
+            {generating ? "Generating…" : "Generate invoice"}
           </Button>
         )}
       </div>
@@ -1237,32 +1265,32 @@ function InvoicesSection({ requirementId }: { requirementId: number }) {
         <p className="text-sm text-muted-foreground">Loading invoices…</p>
       ) : invoices.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No invoice generated yet. Click Generate Invoice to create one.
+          No invoice generated yet. Click Generate invoice to create one.
         </p>
       ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-border">
-                <th className="pb-2 pr-6 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <th className="pb-2 pr-6 text-left text-xs font-medium text-muted-foreground">
                   Invoice #
                 </th>
-                <th className="pb-2 pr-6 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <th className="pb-2 pr-6 text-left text-xs font-medium text-muted-foreground">
                   Subtotal
                 </th>
-                <th className="pb-2 pr-6 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <th className="pb-2 pr-6 text-left text-xs font-medium text-muted-foreground">
                   GST ({invoices[0]?.gst_rate ?? 18}%)
                 </th>
-                <th className="pb-2 pr-6 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <th className="pb-2 pr-6 text-left text-xs font-medium text-muted-foreground">
                   Total
                 </th>
-                <th className="pb-2 pr-6 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <th className="pb-2 pr-6 text-left text-xs font-medium text-muted-foreground">
                   Due date
                 </th>
-                <th className="pb-2 pr-6 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <th className="pb-2 pr-6 text-left text-xs font-medium text-muted-foreground">
                   Status
                 </th>
-                <th className="pb-2 text-right text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <th className="pb-2 text-right text-xs font-medium text-muted-foreground">
                   Action
                 </th>
               </tr>

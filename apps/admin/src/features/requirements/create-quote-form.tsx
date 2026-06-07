@@ -18,7 +18,8 @@ export default function CreateQuoteForm({
     requirement.number_of_workers * requirement.duration_days
   );
   const [ratePerWorker, setRatePerWorker] = useState("");
-  const [advanceAmount, setAdvanceAmount] = useState("");
+  const [workerDailyRate, setWorkerDailyRate] = useState("");
+  const [advancePercent, setAdvancePercent] = useState<number>(20);
   const [paymentModel, setPaymentModel] = useState("client_pays_company");
   const [validUntil, setValidUntil] = useState("");
   const [termsNotes, setTermsNotes] = useState("");
@@ -26,6 +27,13 @@ export default function CreateQuoteForm({
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const quotedAmount = Number(ratePerWorker || 0) * defaultWorkerDays;
+  const workerTotalPayout = Number(workerDailyRate || 0) * defaultWorkerDays;
+  const platformMargin = quotedAmount > 0 && workerTotalPayout > 0 ? quotedAmount - workerTotalPayout : null;
+  const advanceAmount = advancePercent > 0 && quotedAmount > 0
+    ? Math.round(quotedAmount * advancePercent / 100)
+    : null;
+
+  const PRESET_PERCENTS = [0, 10, 20, 25, 30, 50];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,8 +51,9 @@ export default function CreateQuoteForm({
         requirement_id: requirement.id,
         quoted_amount: quotedAmount,
         rate_per_worker: Number(ratePerWorker),
+        worker_daily_rate: workerDailyRate ? Number(workerDailyRate) : null,
         total_worker_days: defaultWorkerDays,
-        advance_amount: advanceAmount ? Number(advanceAmount) : null,
+        advance_amount: advanceAmount,
         payment_model: paymentModel,
         valid_until: validUntil || null,
         terms_notes: termsNotes || null,
@@ -74,7 +83,7 @@ export default function CreateQuoteForm({
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Field label="Rate Per Worker Per Day">
+        <Field label="Client Rate Per Worker Per Day (₹)">
           <input
             type="number"
             min="1"
@@ -82,21 +91,68 @@ export default function CreateQuoteForm({
             className="w-full rounded-lg border border-slate-300 px-3 py-2"
             value={ratePerWorker}
             onChange={(e) => setRatePerWorker(e.target.value)}
-            placeholder="Enter daily rate"
+            placeholder="What client pays per worker/day"
             required
           />
         </Field>
 
-        <Field label="Advance Amount">
+        <Field label="Worker Pay Per Day (₹)">
           <input
             type="number"
-            min="0"
-            step="0.01"
+            min="1"
+            step="1"
             className="w-full rounded-lg border border-slate-300 px-3 py-2"
-            value={advanceAmount}
-            onChange={(e) => setAdvanceAmount(e.target.value)}
-            placeholder="Enter advance amount"
+            value={workerDailyRate}
+            onChange={(e) => setWorkerDailyRate(e.target.value)}
+            placeholder="What worker receives per day"
           />
+          {platformMargin !== null && (
+            <p className={`mt-1 text-xs font-semibold ${platformMargin < 0 ? "text-red-600" : "text-emerald-700"}`}>
+              Platform margin: ₹{Math.abs(platformMargin).toLocaleString("en-IN")} total
+              {platformMargin < 0 ? " — worker rate exceeds client rate!" : ""}
+            </p>
+          )}
+        </Field>
+
+        <Field label="Advance Payment">
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-1.5">
+              {PRESET_PERCENTS.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setAdvancePercent(p)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    advancePercent === p
+                      ? "bg-emerald-600 text-white"
+                      : "border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  {p === 0 ? "None" : `${p}%`}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                value={advancePercent}
+                onChange={(e) => setAdvancePercent(Math.min(100, Math.max(0, Number(e.target.value))))}
+                placeholder="Custom %"
+              />
+              <span className="text-sm text-slate-500">% of total</span>
+              {advanceAmount !== null && quotedAmount > 0 ? (
+                <span className="ml-auto text-sm font-semibold text-emerald-700">
+                  = ₹{advanceAmount.toLocaleString("en-IN")}
+                </span>
+              ) : (
+                <span className="ml-auto text-xs text-slate-400">Enter rate first</span>
+              )}
+            </div>
+          </div>
         </Field>
 
         <Field label="Payment Model">
@@ -128,8 +184,28 @@ export default function CreateQuoteForm({
         <SummaryItem label="Duration" value={`${requirement.duration_days} days`} />
         <SummaryItem label="Worker Days" value={defaultWorkerDays} />
         <SummaryItem
-          label="Quote Total"
-          value={quotedAmount > 0 ? `Rs. ${quotedAmount.toLocaleString("en-IN")}` : "Enter rate"}
+          label="Client Total"
+          value={quotedAmount > 0 ? `₹${quotedAmount.toLocaleString("en-IN")}` : "Enter rate"}
+        />
+        <SummaryItem
+          label="Worker Payout"
+          value={workerTotalPayout > 0 ? `₹${workerTotalPayout.toLocaleString("en-IN")}` : "Enter worker rate"}
+        />
+        <SummaryItem
+          label="Platform Margin"
+          value={
+            platformMargin !== null
+              ? `₹${platformMargin.toLocaleString("en-IN")}`
+              : "Enter both rates"
+          }
+        />
+        <SummaryItem
+          label="Advance Due"
+          value={
+            advanceAmount !== null && quotedAmount > 0
+              ? `₹${advanceAmount.toLocaleString("en-IN")} (${advancePercent}%)`
+              : advancePercent === 0 ? "None" : "Enter rate"
+          }
         />
       </div>
 

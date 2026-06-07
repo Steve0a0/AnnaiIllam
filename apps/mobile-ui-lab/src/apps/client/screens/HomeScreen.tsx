@@ -1,16 +1,15 @@
-import { useCallback, useState } from 'react';
-import type { ReactNode } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import { AlertCircle, ArrowRight, Bell, BriefcaseBusiness, CheckCircle, ChevronRight, Clock, CreditCard, Star, Users } from 'lucide-react-native';
+import { AlertCircle, ArrowRight, Bell, BriefcaseBusiness, CheckCircle, ChevronRight, Clock, CreditCard, Plus, Star, Users } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { clientRequirementsService, type ClientRequirementListItem, type ClientDashboardSummary } from '../../../shared/services/client-requirements.service';
+import { clientRequirementsService, type ClientRequirementListItem, type ClientDashboardSummary, type RequirementStatus } from '../../../shared/services/client-requirements.service';
 import { useAuthStore } from '../../../shared/store/auth.store';
 import type { ClientAppStackParamList, ClientTabParamList } from '../navigation/types';
-import { EmptyBlock, LoadingBlock, StatusBadge } from './components';
+import { LoadingBlock, StatusBadge } from './components';
 import { C, clientStyles } from './clientStyles';
 import { useNetworkStatus } from '../../../shared/hooks/use-network-status';
 
@@ -23,6 +22,37 @@ interface ClientHomeCache {
   summary: ClientDashboardSummary | null;
   requirements: ClientRequirementListItem[];
   cachedAt: number;
+}
+
+function getGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+function getUserFirstName(name?: string | null, phone?: string): string {
+  if (name?.trim()) return name.trim().split(' ')[0];
+  return '';
+}
+
+function getInitials(name?: string | null, phone?: string): string {
+  if (name?.trim()) return name.trim().split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
+  return (phone ?? '').slice(-2) || 'Me';
+}
+
+function statusAccent(status: RequirementStatus): string {
+  switch (status) {
+    case 'in_progress': return C.tealText;
+    case 'assigned':    return C.tealText;
+    case 'quoted':      return C.warningText;
+    case 'approved':    return C.infoText;
+    case 'submitted':
+    case 'under_review': return C.purpleText;
+    case 'completed':   return C.successText;
+    case 'rejected':    return C.dangerText;
+    default:            return C.muted;
+  }
 }
 
 export default function HomeScreen() {
@@ -44,7 +74,7 @@ export default function HomeScreen() {
       if (!raw) return;
       const cached: ClientHomeCache = JSON.parse(raw);
       setSummary(cached.summary);
-      setRequirements(cached.requirements);
+      setRequirements(Array.isArray(cached.requirements) ? cached.requirements : []);
       setIsStale(true);
     } catch {
       // Corrupt cache — ignore
@@ -77,7 +107,6 @@ export default function HomeScreen() {
       setIsStale(false);
       await saveCache(summaryResult.value, listResult.value);
     } else {
-      // Both failed
       throw new Error('Could not load dashboard.');
     }
   }, [saveCache]);
@@ -109,39 +138,64 @@ export default function HomeScreen() {
     }
   };
 
-  const paymentDue = requirements.filter((r) => r.status === 'approved').slice(0, 3);
-  const balanceDue = requirements.filter((r) => r.status === 'in_progress' && (r.pending_balance_amount ?? 0) > 0).slice(0, 3);
-  const needsAttention = requirements.filter((r) => r.status === 'quoted').slice(0, 3);
-  const activeNow = requirements.filter((r) => ['assigned', 'in_progress'].includes(r.status)).slice(0, 3);
-  const unrated = requirements.filter((r) => r.status === 'completed' && !r.has_rated).slice(0, 3);
+  // Derived
+  const paymentDue = useMemo(() => requirements.filter((r) => r.status === 'approved'), [requirements]);
+  const balanceDue = useMemo(
+    () => requirements.filter((r) => r.status === 'in_progress' && (r.pending_balance_amount ?? 0) > 0),
+    [requirements],
+  );
+  const needsAttention = useMemo(() => requirements.filter((r) => r.status === 'quoted'), [requirements]);
+  const activeNow = useMemo(
+    () => requirements.filter((r) => ['assigned', 'in_progress'].includes(r.status)),
+    [requirements],
+  );
+  const unrated = useMemo(
+    () => requirements.filter((r) => r.status === 'completed' && !r.has_rated),
+    [requirements],
+  );
+  const recentRequests = useMemo(() => {
+    // IDs already shown in contextual sections — exclude them from Recent
+    const shownIds = new Set([
+      ...needsAttention.map((r) => r.id),
+      ...activeNow.map((r) => r.id),
+      ...unrated.map((r) => r.id),
+    ]);
+    return requirements.filter((r) => !shownIds.has(r.id)).slice(0, 5);
+  }, [requirements, needsAttention, activeNow, unrated]);
+
+  const dashboardLine = (() => {
+    const active = summary?.open_jobs ?? 0;
+    if (active > 0) return `${active} active job${active !== 1 ? 's' : ''} in progress`;
+    if (requirements.length > 0) return `${requirements.length} request${requirements.length !== 1 ? 's' : ''} total`;
+    return 'Annai Illam staffing client';
+  })();
 
   return (
     <View style={[clientStyles.root, { paddingTop: insets.top }]}>
-      {/* Offline / stale-data banner */}
+      {/* Offline / stale banner */}
       {(networkStatus === 'offline' || isStale) && (
-        <View
-          style={{
-            backgroundColor: isStale ? '#f59e0b' : '#ef4444',
-            paddingVertical: 6,
-            alignItems: 'center',
-          }}
-        >
-          <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>
+        <View style={[styles.statusBanner, { backgroundColor: networkStatus === 'offline' ? '#EF4444' : C.warningText }]}>
+          <Text style={styles.statusBannerText}>
             {networkStatus === 'offline'
-              ? 'No internet connection \u2014 showing cached data'
-              : 'Showing cached data \u2014 pull to refresh'}
+              ? 'No internet connection — showing cached data'
+              : 'Showing cached data — pull to refresh'}
           </Text>
         </View>
       )}
+
       <ScrollView
         contentContainerStyle={clientStyles.content}
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={refresh} tintColor={C.brand} />}
+        showsVerticalScrollIndicator={false}
       >
-        <View style={clientStyles.header}>
-          <View>
-            <Text style={clientStyles.eyebrow}>Client dashboard</Text>
-            <Text style={styles.greeting}>Good morning</Text>
-            <Text style={clientStyles.subtitle}>{user?.phone ?? 'Annai Illam client'}</Text>
+        {/* ── Header ── */}
+        <View style={styles.header}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.greetingLabel}>{getGreeting()}</Text>
+            {!!getUserFirstName(user?.name, user?.phone) && (
+              <Text style={styles.greeting}>{getUserFirstName(user?.name, user?.phone)}</Text>
+            )}
+            <Text style={clientStyles.subtitle}>{dashboardLine}</Text>
           </View>
           <View style={styles.headerActions}>
             <Pressable style={styles.iconButton} accessibilityLabel="Notifications">
@@ -152,220 +206,243 @@ export default function HomeScreen() {
               accessibilityLabel="Profile"
               onPress={() => tabNavigation.navigate('ProfileTab')}
             >
-              <Text style={styles.avatarText}>{user?.phone?.slice(-2) ?? 'Me'}</Text>
+              <Text style={styles.avatarText}>{getInitials(user?.name, user?.phone)}</Text>
             </Pressable>
           </View>
         </View>
 
+        {/* ── New request CTA ── */}
+        <Pressable
+          style={({ pressed }) => [styles.newRequestBtn, pressed && { opacity: 0.88 }]}
+          onPress={() => navigation.navigate('CreateRequest')}
+          accessibilityRole="button"
+          accessibilityLabel="Post a new worker request"
+        >
+          <View style={styles.newRequestIconBox}>
+            <Plus size={15} color={C.brand} />
+          </View>
+          <Text style={styles.newRequestBtnText}>Post a new worker request</Text>
+          <ArrowRight size={15} color={C.brand} />
+        </Pressable>
+
         {isLoading ? (
           <LoadingBlock label="Loading dashboard..." />
         ) : error ? (
-          <EmptyBlock
-            title="Could not load dashboard"
-            detail={error}
-            action={{
-              label: 'Retry',
-              onPress: () => {
+          <View style={styles.errorBlock}>
+            <Text style={styles.errorTitle}>Could not load dashboard</Text>
+            <Text style={styles.errorDetail}>{error}</Text>
+            <Pressable
+              style={styles.retryBtn}
+              onPress={() => {
                 setIsLoading(true);
                 load()
                   .catch(() => setError('Could not load dashboard. Pull down to retry.'))
                   .finally(() => setIsLoading(false));
-              },
-            }}
-          />
+              }}
+            >
+              <Text style={styles.retryBtnText}>Retry</Text>
+            </Pressable>
+          </View>
         ) : (
           <>
+            {/* ── Advance payment due ── */}
             {paymentDue.length > 0 && (
               <Pressable
-                style={styles.paymentBanner}
+                style={[styles.alertBanner, styles.alertBannerRed]}
                 onPress={() => navigation.navigate('RequestDetail', { requirementId: paymentDue[0].id })}
               >
-                <View style={styles.paymentBannerIcon}>
-                  <CreditCard size={20} color="#FFFFFF" />
+                <View style={[styles.alertIcon, { backgroundColor: C.dangerText }]}>
+                  <CreditCard size={16} color="#FFF" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.paymentBannerEyebrow}>Action required</Text>
-                  <Text style={styles.paymentBannerTitle}>
-                    {paymentDue.length === 1
-                      ? `${paymentDue[0].category} · ${paymentDue[0].city}`
-                      : `${paymentDue.length} jobs awaiting advance payment`}
+                  <Text style={[styles.alertEyebrow, { color: C.dangerText }]}>Action required</Text>
+                  <Text style={[styles.alertTitle, { color: '#7F1D1D' }]}>
+                    Advance payment due{paymentDue.length > 1 ? ` · ${paymentDue.length} jobs` : ''}
                   </Text>
-                  <Text style={styles.paymentBannerSub}>
-                    {paymentDue.length === 1
-                      ? 'Pay the advance — workers are on hold'
-                      : 'Workers cannot be deployed until payment is confirmed'}
+                  <Text style={[styles.alertSub, { color: C.dangerText }]}>
+                    {paymentDue[0].category}, {paymentDue[0].city}
                   </Text>
                 </View>
-                <View style={styles.paymentBannerCta}>
-                  <Text style={styles.paymentBannerCtaText}>Pay now</Text>
-                  <ArrowRight size={14} color="#B91C1C" />
+                <View style={[styles.alertCta, { borderColor: C.dangerText + '40' }]}>
+                  <Text style={[styles.alertCtaText, { color: C.dangerText }]}>Pay now</Text>
+                  <ChevronRight size={11} color={C.dangerText} />
                 </View>
               </Pressable>
             )}
 
+            {/* ── Balance due ── */}
             {balanceDue.length > 0 && (
               <Pressable
-                style={styles.balanceBanner}
+                style={[styles.alertBanner, styles.alertBannerAmber]}
                 onPress={() => navigation.navigate('RequestDetail', { requirementId: balanceDue[0].id })}
               >
-                <View style={styles.balanceBannerIcon}>
-                  <CreditCard size={20} color="#FFFFFF" />
+                <View style={[styles.alertIcon, { backgroundColor: C.warningText }]}>
+                  <CreditCard size={16} color="#FFF" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.balanceBannerEyebrow}>Payment due</Text>
-                  <Text style={styles.balanceBannerTitle}>
-                    {balanceDue.length === 1
-                      ? `${balanceDue[0].category} · ${balanceDue[0].city}`
-                      : `${balanceDue.length} jobs have an outstanding balance`}
+                  <Text style={[styles.alertEyebrow, { color: C.warningText }]}>Balance outstanding</Text>
+                  <Text style={[styles.alertTitle, { color: '#78350F' }]}>
+                    ₹{new Intl.NumberFormat('en-IN').format(balanceDue[0].pending_balance_amount ?? 0)} due
                   </Text>
-                  <Text style={styles.balanceBannerSub}>
-                    {balanceDue.length === 1 && balanceDue[0].pending_balance_amount
-                      ? `₹${formatAmount(balanceDue[0].pending_balance_amount)} remaining — workers are active`
-                      : 'Settle the remaining balance to keep workers active'}
+                  <Text style={[styles.alertSub, { color: '#92400E' }]}>
+                    {balanceDue[0].category}, {balanceDue[0].city}
                   </Text>
                 </View>
-                <View style={styles.balanceBannerCta}>
-                  <Text style={styles.balanceBannerCtaText}>Pay now</Text>
-                  <ArrowRight size={14} color="#92400E" />
+                <View style={[styles.alertCta, { borderColor: C.warningText + '40' }]}>
+                  <Text style={[styles.alertCtaText, { color: C.warningText }]}>Settle</Text>
+                  <ChevronRight size={11} color={C.warningText} />
                 </View>
               </Pressable>
             )}
 
+            {/* ── Quote review needed ── */}
+            {needsAttention.length > 0 && (
+              <Pressable
+                style={[styles.alertBanner, styles.alertBannerAmber]}
+                onPress={() => navigation.navigate('RequestDetail', { requirementId: needsAttention[0].id })}
+              >
+                <View style={[styles.alertIcon, { backgroundColor: C.warningText }]}>
+                  <AlertCircle size={16} color="#FFF" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.alertEyebrow, { color: C.warningText }]}>Awaiting your response</Text>
+                  <Text style={[styles.alertTitle, { color: '#78350F' }]}>
+                    Quote ready to review{needsAttention.length > 1 ? ` · ${needsAttention.length} pending` : ''}
+                  </Text>
+                  <Text style={[styles.alertSub, { color: '#92400E' }]}>
+                    {needsAttention[0].category}, {needsAttention[0].city}
+                  </Text>
+                </View>
+                <View style={[styles.alertCta, { borderColor: C.warningText + '40' }]}>
+                  <Text style={[styles.alertCtaText, { color: C.warningText }]}>Review</Text>
+                  <ChevronRight size={11} color={C.warningText} />
+                </View>
+              </Pressable>
+            )}
+
+            {/* ── Stats strip ── */}
             <View style={styles.statsRow}>
-              <StatCard
-                icon={<AlertCircle size={16} color={C.warningText} />}
-                label="Quotes pending"
+              <StatTile
+                label="Quotes"
                 value={summary?.pending_quotes ?? 0}
-                accent={C.warningText}
-                bg={C.warningBg}
+                tint={needsAttention.length > 0 ? C.warningText : C.muted}
+                bg={needsAttention.length > 0 ? C.warningBg : C.surface}
+                borderColor={needsAttention.length > 0 ? C.warningText + '35' : C.border}
               />
-              <StatCard
-                icon={<BriefcaseBusiness size={16} color={C.tealText} />}
-                label="Active jobs"
+              <StatTile
+                label="Active"
                 value={summary?.open_jobs ?? 0}
-                accent={C.tealText}
-                bg={C.tealBg}
+                tint={(summary?.open_jobs ?? 0) > 0 ? C.tealText : C.muted}
+                bg={(summary?.open_jobs ?? 0) > 0 ? C.tealBg : C.surface}
+                borderColor={(summary?.open_jobs ?? 0) > 0 ? C.tealText + '35' : C.border}
               />
-              <StatCard
-                icon={<CheckCircle size={16} color={C.successText} />}
-                label="Completed"
+              <StatTile
+                label="Done"
                 value={summary?.completed_jobs ?? 0}
-                accent={C.successText}
-                bg={C.successBg}
+                tint={(summary?.completed_jobs ?? 0) > 0 ? C.successText : C.muted}
+                bg={(summary?.completed_jobs ?? 0) > 0 ? C.successBg : C.surface}
+                borderColor={(summary?.completed_jobs ?? 0) > 0 ? C.successText + '35' : C.border}
               />
             </View>
 
-            {needsAttention.length > 0 && (
-              <>
-                <View style={styles.sectionHeader}>
-                  <View style={styles.sectionLabelRow}>
-                    <AlertCircle size={13} color={C.warningText} />
-                    <Text style={[clientStyles.sectionLabel, { color: C.warningText }]}>Needs attention</Text>
-                  </View>
-                </View>
-                {needsAttention.map((item) => (
-                  <Pressable
-                    key={item.id}
-                    style={[clientStyles.card, styles.attentionCard]}
-                    onPress={() => navigation.navigate('RequestDetail', { requirementId: item.id })}
-                  >
-                    <View style={styles.attentionAccent} />
-                    <View style={styles.cardInner}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.requestTitle}>{item.category}</Text>
-                        <Text style={clientStyles.subtitle}>{item.city} · Starts {formatDate(item.start_date)}</Text>
-                        <Text style={styles.attentionHint}>Quote ready — tap to review & approve</Text>
-                      </View>
-                      <ChevronRight size={18} color={C.warningText} />
-                    </View>
-                  </Pressable>
-                ))}
-              </>
-            )}
-
+            {/* ── Active now ── */}
             {activeNow.length > 0 && (
-              <>
+              <View style={styles.section}>
                 <View style={styles.sectionHeader}>
-                  <View style={styles.sectionLabelRow}>
-                    <Clock size={13} color={C.tealText} />
-                    <Text style={[clientStyles.sectionLabel, { color: C.tealText }]}>Active now</Text>
+                  <View style={styles.sectionTitleRow}>
+                    <View style={[styles.sectionDot, { backgroundColor: C.tealText }]} />
+                    <Text style={[styles.sectionTitle, { color: C.tealText }]}>Active now</Text>
                   </View>
                 </View>
                 {activeNow.map((item) => (
-                  <Pressable
+                  <RequestCard
                     key={item.id}
-                    style={[clientStyles.card, styles.activeCard]}
+                    item={item}
                     onPress={() => navigation.navigate('RequestDetail', { requirementId: item.id })}
-                  >
-                    <View style={styles.activeAccent} />
-                    <View style={styles.cardInner}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.requestTitle}>{item.category}</Text>
-                        <Text style={clientStyles.subtitle}>{item.city} · Starts {formatDate(item.start_date)}</Text>
-                      </View>
-                      <View style={styles.rightCol}>
-                        <StatusBadge value={item.status} />
-                        <Pressable
-                          style={styles.workersLink}
-                          onPress={(e) => {
-                            e.stopPropagation();
-                            navigation.navigate('AssignedWorkers', { requirementId: item.id });
-                          }}
-                        >
-                          <Users size={12} color={C.tealText} />
-                          <Text style={styles.workersLinkText}>{item.number_of_workers} workers</Text>
-                          <ChevronRight size={12} color={C.tealText} />
-                        </Pressable>
-                      </View>
-                    </View>
-                  </Pressable>
+                    onWorkersPress={() => navigation.navigate('AssignedWorkers', { requirementId: item.id })}
+                  />
                 ))}
-              </>
+              </View>
             )}
 
-            {unrated.length > 0 && (
-              <>
+            {/* ── Needs attention: quote review ── */}
+            {needsAttention.length > 0 && (
+              <View style={styles.section}>
                 <View style={styles.sectionHeader}>
-                  <View style={styles.sectionLabelRow}>
-                    <Star size={13} color={C.brand} />
-                    <Text style={[clientStyles.sectionLabel, { color: C.brand }]}>Rate your experience</Text>
+                  <View style={styles.sectionTitleRow}>
+                    <View style={[styles.sectionDot, { backgroundColor: C.warningText }]} />
+                    <Text style={[styles.sectionTitle, { color: C.warningText }]}>Needs attention</Text>
+                  </View>
+                </View>
+                {needsAttention.map((item) => (
+                  <RequestCard
+                    key={item.id}
+                    item={item}
+                    onPress={() => navigation.navigate('RequestDetail', { requirementId: item.id })}
+                  />
+                ))}
+              </View>
+            )}
+
+            {/* ── Rate your experience ── */}
+            {unrated.length > 0 && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <View style={styles.sectionTitleRow}>
+                    <Star size={11} color={C.brand} />
+                    <Text style={[styles.sectionTitle, { color: C.brand }]}>Rate your experience</Text>
                   </View>
                 </View>
                 {unrated.map((item) => (
-                  <Pressable
+                  <RequestCard
                     key={item.id}
-                    style={[clientStyles.card, styles.rateCard]}
+                    item={item}
                     onPress={() => navigation.navigate('RateRequirement', { requirementId: item.id, category: item.category })}
-                  >
-                    <View style={styles.rateAccent} />
-                    <View style={styles.cardInner}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.requestTitle}>{item.category}</Text>
-                        <Text style={clientStyles.subtitle}>{item.city} · Completed</Text>
-                        <Text style={styles.rateHint}>How was your experience? Tap to leave a rating</Text>
-                      </View>
-                      <ChevronRight size={18} color={C.brand} />
-                    </View>
-                  </Pressable>
+                  />
                 ))}
-              </>
+              </View>
             )}
 
-            {paymentDue.length === 0 && needsAttention.length === 0 && activeNow.length === 0 && (
-              <EmptyBlock
-                title="All caught up"
-                detail={
-                  requirements.length === 0
-                    ? 'No requests yet. Head to Jobs to create your first worker request.'
-                    : 'No quotes pending or active jobs right now.'
-                }
-              />
-            )}
+            {/* ── Recent requests (always visible) ── */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionTitleRow}>
+                  <Text style={styles.sectionTitle}>Recent requests</Text>
+                </View>
+                <Pressable
+                  style={styles.sectionLink}
+                  onPress={() => navigation.navigate('AllRequests')}
+                >
+                  <Text style={styles.sectionLinkText}>View all</Text>
+                  <ArrowRight size={12} color={C.brand} />
+                </Pressable>
+              </View>
 
-            <Pressable style={styles.viewAllRow} onPress={() => tabNavigation.navigate('JobsTab')}>
-              <Text style={clientStyles.ghostButtonText}>View all requests</Text>
-              <ArrowRight size={15} color={C.brand} />
-            </Pressable>
+              {recentRequests.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <View style={styles.emptyStateIcon}>
+                    <BriefcaseBusiness size={32} color={C.muted} />
+                  </View>
+                  <Text style={styles.emptyStateTitle}>No requests yet</Text>
+                  <Text style={styles.emptyStateDetail}>
+                    Post your first request above and we will handle the rest.
+                  </Text>
+                </View>
+              ) : (
+                recentRequests.map((item) => (
+                  <RequestCard
+                    key={item.id}
+                    item={item}
+                    onPress={() => navigation.navigate('RequestDetail', { requirementId: item.id })}
+                    onWorkersPress={
+                      ['assigned', 'in_progress'].includes(item.status)
+                        ? () => navigation.navigate('AssignedWorkers', { requirementId: item.id })
+                        : undefined
+                    }
+                  />
+                ))
+              )}
+            </View>
           </>
         )}
       </ScrollView>
@@ -373,25 +450,82 @@ export default function HomeScreen() {
   );
 }
 
-function StatCard({
-  icon,
+// ── Sub-components ──────────────────────────────────────────────
+
+function StatTile({
   label,
   value,
-  accent,
+  tint,
   bg,
+  borderColor,
 }: {
-  icon: ReactNode;
   label: string;
   value: number;
-  accent: string;
+  tint: string;
   bg: string;
+  borderColor: string;
 }) {
   return (
-    <View style={[styles.statCard, { borderColor: accent + '33' }]}>
-      <View style={[styles.statIcon, { backgroundColor: bg }]}>{icon}</View>
-      <Text style={[styles.statValue, { color: accent }]}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
+    <View style={[styles.statTile, { backgroundColor: bg, borderColor }]}>
+      <Text style={[styles.statTileValue, { color: tint }]}>{value}</Text>
+      <Text style={[styles.statTileLabel, { color: tint }]}>{label}</Text>
     </View>
+  );
+}
+
+function RequestCard({
+  item,
+  onPress,
+  onWorkersPress,
+}: {
+  item: ClientRequirementListItem;
+  onPress: () => void;
+  onWorkersPress?: () => void;
+}) {
+  const accent = statusAccent(item.status);
+  const isActive = ['assigned', 'in_progress'].includes(item.status);
+  const isQuote = item.status === 'quoted';
+  const isUnrated = item.status === 'completed' && !item.has_rated;
+
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.reqCard, pressed && styles.reqCardPressed]}
+      onPress={onPress}
+    >
+      <View style={[styles.reqAccent, { backgroundColor: accent }]} />
+      <View style={styles.reqBody}>
+        <View style={styles.reqTopRow}>
+          <View style={{ flex: 1, paddingRight: 8 }}>
+            <Text style={styles.reqTitle} numberOfLines={1}>{item.category}</Text>
+            <Text style={styles.reqSub} numberOfLines={1}>{item.city} · {formatDate(item.start_date)}</Text>
+          </View>
+          <StatusBadge value={item.status} />
+        </View>
+        <View style={styles.reqBottomRow}>
+          {isActive && onWorkersPress ? (
+            <Pressable style={styles.workersChip} onPress={onWorkersPress} hitSlop={6}>
+              <Users size={11} color={C.tealText} />
+              <Text style={styles.workersChipText}>{item.number_of_workers} workers</Text>
+            </Pressable>
+          ) : isQuote ? (
+            <View style={styles.hintChip}>
+              <AlertCircle size={11} color={C.warningText} />
+              <Text style={[styles.hintChipText, { color: C.warningText }]}>Tap to review quote</Text>
+            </View>
+          ) : isUnrated ? (
+            <View style={styles.hintChip}>
+              <Star size={11} color={C.brand} />
+              <Text style={[styles.hintChipText, { color: C.brand }]}>Tap to leave a rating</Text>
+            </View>
+          ) : (
+            <Text style={styles.reqMeta}>
+              {item.number_of_workers} worker{item.number_of_workers !== 1 ? 's' : ''} · {formatDate(item.start_date)}
+            </Text>
+          )}
+          <ChevronRight size={15} color={C.muted} />
+        </View>
+      </View>
+    </Pressable>
   );
 }
 
@@ -404,16 +538,38 @@ function formatAmount(value: number) {
 }
 
 const styles = StyleSheet.create({
+  statusBanner: {
+    paddingVertical: 7,
+    alignItems: 'center',
+  },
+  statusBannerText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingBottom: 4,
+  },
+  greetingLabel: {
+    fontSize: 13,
+    color: C.muted,
+    fontWeight: '500',
+  },
   greeting: {
-    color: C.ink,
-    fontSize: 22,
-    lineHeight: 28,
+    fontSize: 24,
     fontWeight: '700',
+    color: C.ink,
+    lineHeight: 30,
+    marginTop: 1,
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    paddingTop: 2,
   },
   iconButton: {
     width: 38,
@@ -425,166 +581,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: C.surface,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    alignItems: 'center',
-    gap: 4,
-  },
-  statIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 2,
-  },
-  statValue: {
-    fontSize: 20,
-    fontWeight: '700',
-    lineHeight: 26,
-  },
-  statLabel: {
-    color: C.muted,
-    fontSize: 11,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 4,
-  },
-  sectionLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  attentionCard: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    padding: 0,
-    overflow: 'hidden',
-    borderColor: C.warningText + '40',
-  },
-  attentionAccent: {
-    width: 4,
-    backgroundColor: C.warningText,
-  },
-  activeCard: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    padding: 0,
-    overflow: 'hidden',
-    borderColor: C.tealText + '40',
-  },
-  activeAccent: {
-    width: 4,
-    backgroundColor: C.tealText,
-  },
-  cardInner: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    gap: 10,
-  },
-  requestTitle: {
-    color: C.ink,
-    fontSize: 15,
-    fontWeight: '600',
-    lineHeight: 20,
-  },
-  attentionHint: {
-    color: C.warningText,
-    fontSize: 12,
-    fontWeight: '500',
-    marginTop: 4,
-  },
-  paymentBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: C.dangerBg,
-    borderWidth: 1,
-    borderColor: C.dangerText + '50',
-    borderRadius: 14,
-    padding: 14,
-  },
-  paymentBannerIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: C.dangerText,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  paymentBannerEyebrow: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    color: C.dangerText,
-    marginBottom: 2,
-  },
-  paymentBannerTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#7F1D1D',
-    lineHeight: 19,
-  },
-  paymentBannerSub: {
-    fontSize: 12,
-    color: C.dangerText,
-    marginTop: 2,
-    lineHeight: 17,
-  },
-  paymentBannerCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: C.dangerText + '40',
-  },
-  paymentBannerCtaText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#B91C1C',
-  },
-  rightCol: {
-    alignItems: 'flex-end',
-    gap: 8,
-  },
-  workersLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: C.tealBg,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  workersLinkText: {
-    color: C.tealText,
-    fontSize: 12,
-    fontWeight: '600',
-  },
   avatarButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: C.brand,
     alignItems: 'center',
     justifyContent: 'center',
@@ -594,82 +594,286 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-  viewAllRow: {
+
+  // New request CTA
+  newRequestBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    paddingVertical: 4,
+    gap: 10,
+    backgroundColor: C.brandSoft,
+    borderWidth: 1.5,
+    borderColor: C.brand + '50',
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
   },
-  balanceBanner: {
+  newRequestIconBox: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: C.brand + '18',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  newRequestBtnText: {
+    flex: 1,
+    color: C.brand,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+
+  // Error block
+  errorBlock: {
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+    gap: 8,
+  },
+  errorTitle: {
+    color: C.ink,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  errorDetail: {
+    color: C.muted,
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  retryBtn: {
+    marginTop: 4,
+    backgroundColor: C.brand,
+    borderRadius: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 20,
+  },
+  retryBtnText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // Alert banners
+  alertBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: '#FFFBEB',
     borderWidth: 1,
-    borderColor: '#D9770650',
     borderRadius: 14,
     padding: 14,
   },
-  balanceBannerIcon: {
-    width: 40,
-    height: 40,
+  alertBannerRed: {
+    backgroundColor: C.dangerBg,
+    borderColor: C.dangerText + '30',
+  },
+  alertBannerAmber: {
+    backgroundColor: C.warningBg,
+    borderColor: C.warningText + '30',
+  },
+  alertIcon: {
+    width: 38,
+    height: 38,
     borderRadius: 10,
-    backgroundColor: '#D97706',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  balanceBannerEyebrow: {
+  alertEyebrow: {
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
-    color: '#B45309',
     marginBottom: 2,
   },
-  balanceBannerTitle: {
+  alertTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#78350F',
     lineHeight: 19,
   },
-  balanceBannerSub: {
+  alertSub: {
     fontSize: 12,
-    color: '#92400E',
     marginTop: 2,
     lineHeight: 17,
   },
-  balanceBannerCta: {
+  alertCta: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    gap: 2,
     backgroundColor: '#FFFFFF',
     borderRadius: 8,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderWidth: 1,
-    borderColor: '#D9770640',
   },
-  balanceBannerCtaText: {
+  alertCtaText: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#92400E',
   },
-  rateCard: {
+
+  // Stats
+  statsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  statTile: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    gap: 3,
+  },
+  statTileValue: {
+    fontSize: 22,
+    fontWeight: '700',
+    lineHeight: 26,
+  },
+  statTileLabel: {
+    fontSize: 11,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+
+  // Sections
+  section: {
+    gap: 10,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 2,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sectionDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+  },
+  sectionTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    color: C.muted,
+  },
+  sectionLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  sectionLinkText: {
+    color: C.brand,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  // Request cards
+  reqCard: {
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'stretch',
-    padding: 0,
     overflow: 'hidden',
+  },
+  reqCardPressed: {
+    opacity: 0.92,
     borderColor: C.brand + '40',
   },
-  rateAccent: {
+  reqAccent: {
     width: 4,
-    backgroundColor: C.brand,
   },
-  rateHint: {
-    color: C.brand,
+  reqBody: {
+    flex: 1,
+    padding: 14,
+    gap: 10,
+  },
+  reqTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  reqTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: C.ink,
+    lineHeight: 20,
+  },
+  reqSub: {
+    fontSize: 13,
+    color: C.muted,
+    marginTop: 2,
+  },
+  reqBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  reqMeta: {
+    fontSize: 13,
+    color: C.muted,
+  },
+  workersChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: C.tealBg,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  workersChipText: {
+    color: C.tealText,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  hintChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  hintChipText: {
     fontSize: 12,
     fontWeight: '500',
-    marginTop: 4,
+  },
+
+  // Empty state
+  emptyState: {
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 14,
+    padding: 28,
+    alignItems: 'center',
+    gap: 8,
+  },
+  emptyStateIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    backgroundColor: C.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  emptyStateTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: C.ink,
+  },
+  emptyStateDetail: {
+    fontSize: 13,
+    color: C.muted,
+    textAlign: 'center',
+    lineHeight: 20,
+    maxWidth: 240,
   },
 });

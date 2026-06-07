@@ -124,6 +124,7 @@ def admin_requirement_detail(
                 "id": quote.id,
                 "quoted_amount": quote.quoted_amount,
                 "rate_per_worker": quote.rate_per_worker,
+                "worker_daily_rate": quote.worker_daily_rate,
                 "total_worker_days": quote.total_worker_days,
                 "advance_amount": quote.advance_amount,
                 "payment_model": quote.payment_model,
@@ -340,6 +341,23 @@ def complete_requirement(
 
     requirement.status = RequirementStatus.COMPLETED.value
     requirement.updated_by_user_id = current_user.id
+
+    # Cascade completion to all still-active assignments so the
+    # Salary Disbursements section can create disbursements for them.
+    _completable = {
+        AssignmentStatus.ASSIGNED.value,
+        AssignmentStatus.ACCEPTED.value,
+        AssignmentStatus.ACTIVE.value,
+    }
+    active_assignments = db.execute(
+        select(Assignment).where(
+            Assignment.requirement_id == requirement_id,
+            Assignment.status.in_(_completable),
+        )
+    ).scalars().all()
+    for a in active_assignments:
+        a.status = AssignmentStatus.COMPLETED.value
+
     db.commit()
 
     audit_event(

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.roles import UserRole
 from app.core.security import hash_password
 from app.db.session import SessionLocal
+from app.models.admin_profile import AdminProfile
 from app.models.user import User
 
 
@@ -33,6 +34,24 @@ def _validate_password(password: str) -> str:
     return password
 
 
+def _upsert_super_admin_profile(db: Session, user: User) -> None:
+    """Ensure the seeded admin has a super_admin AdminProfile."""
+    from sqlalchemy import select as _select
+    profile = db.execute(
+        _select(AdminProfile).where(AdminProfile.user_id == user.id)
+    ).scalar_one_or_none()
+    if profile:
+        profile.full_name = user.name or "Admin"
+        profile.permission_group = "super_admin"
+    else:
+        db.add(AdminProfile(
+            user_id=user.id,
+            full_name=user.name or "Admin",
+            permission_group="super_admin",
+        ))
+    db.commit()
+
+
 def seed_admin(db: Session, *, email: str, password: str, name: str = "Admin") -> SeedAdminResult:
     email = _normalise_email(email)
     password = _validate_password(password)
@@ -51,6 +70,7 @@ def seed_admin(db: Session, *, email: str, password: str, name: str = "Admin") -
         user.is_email_verified = True
         db.commit()
         db.refresh(user)
+        _upsert_super_admin_profile(db, user)
         return SeedAdminResult(action="updated", user_id=user.id, email=user.email or email)
 
     user = User(
@@ -64,6 +84,7 @@ def seed_admin(db: Session, *, email: str, password: str, name: str = "Admin") -
     db.add(user)
     db.commit()
     db.refresh(user)
+    _upsert_super_admin_profile(db, user)
     return SeedAdminResult(action="created", user_id=user.id, email=user.email or email)
 
 

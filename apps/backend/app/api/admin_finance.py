@@ -323,6 +323,9 @@ def update_client_payment_status(
                 data={"type": "payment_received", "requirement_id": str(payment.requirement_id)},
             )
 
+        # Send invoice email to client
+        _send_invoice_in_background(background_tasks, db, payment)
+
     return success_response(
         "Payment status updated",
         {
@@ -599,3 +602,72 @@ def mark_payroll_run_paid(
             "payouts_created": payouts_created,
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Internal helper — invoice email via background task
+# ---------------------------------------------------------------------------
+
+def _send_invoice_in_background(
+    background_tasks: "BackgroundTasks",
+    db: "Session",
+    payment: "ClientPayment",
+) -> None:
+    """Resolve client email + requirement details, then enqueue the invoice send."""
+    try:
+        from app.models.client_profile import ClientProfile
+        from app.models.requirement import Requirement
+        from app.services.email_service import send_payment_invoice
+        from sqlalchemy import select as _sa_select
+
+        # Resolve client profile and email
+        client_profile = db.execute(
+            _sa_select(ClientProfile).where(ClientProfile.id == payment.client_id)
+        ).scalar_one_or_none()
+
+        if not client_profile:
+            return
+
+        # Email priority: ClientProfile.email > User.email
+        client_user = db.execute(
+            _sa_select(User).where(User.id == client_profile.user_id)
+        ).scalar_one_or_none()
+
+        to_email = client_profile.email or (client_user.email if client_user else None)
+        if not to_email:
+            return  # No email on record — skip silently
+
+        # Resolve requirement
+        requirement = db.execute(
+            _sa_select(Requirement).where(Requirement.id == payment.requirement_id)
+        ).scalar_one_or_none()
+
+        if not requirement:
+            return
+
+        client_name = (
+            client_profile.company_name or client_profile.contact_name or "Valued Client"
+        )
+
+        background_tasks.add_task(
+            send_payment_invoice,
+            to_email=to_email,
+            client_name=client_name,
+            payment_id=payment.id,
+            payment_date=payment.paid_at or payment.updated_at,
+            payment_model=payment.payment_model,
+            amount=payment.amount,
+            reference_note=payment.reference_note,
+            requirement_category=requirement.category,
+            requirement_subcategory=requirement.subcategory,
+            work_location=requirement.work_location,
+            city=requirement.city,
+            state=requirement.state,
+            start_date=str(requirement.start_date) if requirement.start_date else "",
+            duration_days=requirement.duration_days or 1,
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "Failed to enqueue invoice email for payment #%s", payment.id
+        )

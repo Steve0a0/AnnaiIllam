@@ -20,13 +20,37 @@ def _strip_unsafe(value: str) -> str:
 
 
 def normalize_phone(phone: str) -> str:
-    normalized = phone.strip().replace(" ", "")
-    # Accept E.164 (+<digits>) or bare digits
-    if re.fullmatch(r"\+\d{10,15}", normalized):
+    """Normalize a phone number to E.164 format (+91XXXXXXXXXX for Indian numbers).
+
+    Accepts:
+      9876543210       → +919876543210
+      +919876543210    → +919876543210
+      919876543210     → +919876543210
+      09876543210      → +919876543210
+    """
+    normalized = phone.strip().replace(" ", "").replace("-", "")
+
+    # Already E.164: +91 followed by exactly 10 digits
+    if re.fullmatch(r"\+91\d{10}", normalized):
         return normalized
-    if re.fullmatch(r"\d{10,15}", normalized):
+
+    # Country code without +: 91 followed by exactly 10 digits
+    if re.fullmatch(r"91\d{10}", normalized):
+        return "+" + normalized
+
+    # Leading zero: 0 followed by exactly 10 digits
+    if re.fullmatch(r"0\d{10}", normalized):
+        return "+91" + normalized[1:]
+
+    # Bare 10 digits (most common from mobile app)
+    if re.fullmatch(r"\d{10}", normalized):
+        return "+91" + normalized
+
+    # Generic E.164 for non-Indian numbers (pass through)
+    if re.fullmatch(r"\+\d{7,15}", normalized):
         return normalized
-    raise ValueError("Invalid phone number format")
+
+    raise ValueError(f"Invalid phone number format: {phone!r}")
 
 
 def strip_text(value: str) -> str:

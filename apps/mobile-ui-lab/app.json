@@ -22,11 +22,25 @@
           "remote-notification"
         ],
         "NSFaceIDUsageDescription": "Allow Annai Illam to use Face ID to secure your worker account.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleURLSchemes": [
+          "com.googleusercontent.apps.255269959048-r6g317np9h2fvoro65qisq19jj4hv7ct"
+        ]
       }
     },
     "android": {
       "package": "com.annaiillam",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "com.googleusercontent.apps.255269959048-ooojpl2ncdgm7afv96vkf4h3dbvcs3pd"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"

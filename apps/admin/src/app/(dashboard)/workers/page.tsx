@@ -67,7 +67,7 @@ export default function WorkersPage() {
   const queryClient = useQueryClient();
   const [csv, setCsv] = useState(sampleCsv);
   const [search, setSearch] = useState("");
-  const [verificationStatus, setVerificationStatus] = useState("pending");
+  const [verificationStatus, setVerificationStatus] = useState("under_review");
   const [availabilityFilter, setAvailabilityFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [page, setPage] = useState(1);
@@ -254,7 +254,7 @@ export default function WorkersPage() {
             <div className="flex flex-wrap gap-2 pt-2">
               {(
                 [
-                  ["pending", "Pending review"],
+                  ["under_review", "Pending review"],
                   ["approved", "Approved"],
                   ["rejected", "Rejected"],
                   ["", "All"],
@@ -382,6 +382,12 @@ export default function WorkersPage() {
                           <Link
                             href={`/workers/${worker.id}`}
                             onClick={(e) => e.stopPropagation()}
+                            onMouseEnter={() =>
+                              queryClient.prefetchQuery({
+                                queryKey: ["admin-worker-detail", worker.id],
+                                queryFn: () => peopleService.getWorkerById(worker.id),
+                              })
+                            }
                             className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
                           >
                             View
@@ -599,6 +605,12 @@ function WorkerReviewPanel({
             ) : null}
             <Link
               href={`/workers/${worker.id}`}
+              onMouseEnter={() =>
+                queryClient.prefetchQuery({
+                  queryKey: ["admin-worker-detail", worker.id],
+                  queryFn: () => peopleService.getWorkerById(worker.id),
+                })
+              }
               className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               View full profile

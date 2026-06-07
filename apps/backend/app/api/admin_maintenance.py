@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.roles import require_role
+from app.api.dependencies.roles import require_permission_group, require_role
 from app.core.roles import UserRole
 from app.db.deps import get_db
 from app.models.otp_code import OtpCode
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/admin/maintenance", tags=["Admin Maintenance"])
 
 @router.post("/cleanup")
 def run_cleanup(
-    current_user: User = Depends(require_role(UserRole.ADMIN.value)),
+    current_user: User = Depends(require_permission_group("super_admin")),
     db: Session = Depends(get_db),
 ):
     """Delete expired and used OTP codes and expired revoked token records."""

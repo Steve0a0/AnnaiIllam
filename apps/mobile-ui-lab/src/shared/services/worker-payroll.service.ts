@@ -1,4 +1,5 @@
 import { http } from '../lib/http';
+import { authStorage } from '../lib/auth-storage';
 
 type Envelope<T> = { success: boolean; message: string; data: T };
 
@@ -46,5 +47,16 @@ export const workerPayrollService = {
       responseType: 'text',
     });
     return res.data as unknown as string;
+  },
+
+  getPayslipPdfUrl: (payrollItemId: number): string => {
+    // Returns the full URL for the PDF payslip so expo-file-system can download it.
+    const base = (http.defaults.baseURL ?? '').replace(/\/$/, '');
+    return `${base}/worker/payroll/${payrollItemId}/payslip.pdf`;
+  },
+
+  getAccessToken: (): Promise<string | null> => {
+    // Read the token directly from SecureStore (same source as the axios interceptor).
+    return authStorage.getAccessToken();
   },
 };

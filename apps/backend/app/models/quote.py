@@ -15,6 +15,7 @@ class Quote(Base):
 
     quoted_amount: Mapped[int] = mapped_column(Integer)
     rate_per_worker: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    worker_daily_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_worker_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     advance_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)
     payment_model: Mapped[str] = mapped_column(String(50))

@@ -275,10 +275,26 @@ export default function InvoiceDetailScreen() {
             <Text style={s.cardTitle}>Invoice breakdown</Text>
 
             <View style={s.breakRow}>
-              <Text style={s.breakLabel}>Invoice total</Text>
+              <Text style={s.breakLabel}>Quote total</Text>
               <Text style={s.breakValue}>{fmt(invoiceTotal)}</Text>
             </View>
 
+            {/* Advance-mode: show two-stage payment structure clearly */}
+            {paymentMode === 'advance' && advanceAmount != null && paidRecords.length === 0 && (
+              <>
+                <View style={s.breakDivider} />
+                <View style={s.breakRow}>
+                  <Text style={[s.breakLabel, { color: C.brand, fontWeight: '600' }]}>Advance due now</Text>
+                  <Text style={[s.breakValue, { color: C.brand, fontWeight: '700' }]}>{fmt(advanceAmount)}</Text>
+                </View>
+                <View style={s.breakRow}>
+                  <Text style={[s.breakLabel, s.breakLabelSub]}>Balance after advance</Text>
+                  <Text style={[s.breakValue, { color: C.muted }]}>{fmt(Math.max(0, invoiceTotal - advanceAmount))}</Text>
+                </View>
+              </>
+            )}
+
+            {/* Normal mode: show each paid record as a deduction */}
             {paidRecords.map((p) => (
               <View key={p.id} style={s.breakRow}>
                 <View>
@@ -298,11 +314,16 @@ export default function InvoiceDetailScreen() {
               </View>
             ))}
 
-            <View style={s.breakDivider} />
-            <View style={s.breakRow}>
-              <Text style={s.breakDueLabel}>Outstanding</Text>
-              <Text style={s.breakDueValue}>{fmt(outstanding)}</Text>
-            </View>
+            {/* Only show outstanding divider/row when there are paid records (not in fresh-advance mode) */}
+            {(paidRecords.length > 0 || paymentMode !== 'advance') && (
+              <>
+                <View style={s.breakDivider} />
+                <View style={s.breakRow}>
+                  <Text style={s.breakDueLabel}>Outstanding</Text>
+                  <Text style={s.breakDueValue}>{fmt(outstanding)}</Text>
+                </View>
+              </>
+            )}
           </View>
 
           {/* ── Pay button ── */}

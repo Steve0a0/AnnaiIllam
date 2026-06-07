@@ -87,19 +87,35 @@ def get_dashboard_alerts(
     active_assignments = get_active_assignments(db)
     requirements = get_all_requirements(db)
 
-    overdue_complaints = [
+    overdue_ids: set[int] = set()
+    overdue_complaints = []
+    for item in complaints:
+        if item.status in {"open", "under_review"} and item.created_at <= now - timedelta(
+            hours=sla_policy_map.get(item.severity, sla_policy_map["medium"])["resolution_hours"]
+        ):
+            overdue_ids.add(item.id)
+            overdue_complaints.append(
+                {
+                    "id": item.id,
+                    "requirement_id": item.requirement_id,
+                    "severity": item.severity,
+                    "status": item.status,
+                    "created_at": item.created_at.isoformat(),
+                    "age_hours": int((now - item.created_at).total_seconds() // 3600),
+                }
+            )
+
+    # Fresh open complaints not yet past SLA — shown immediately in the bell.
+    open_complaints = [
         {
             "id": item.id,
             "requirement_id": item.requirement_id,
             "severity": item.severity,
             "status": item.status,
             "created_at": item.created_at.isoformat(),
-            "age_hours": int((now - item.created_at).total_seconds() // 3600),
         }
         for item in complaints
-        if item.status in {"open", "under_review"}
-        and item.created_at
-        <= now - timedelta(hours=sla_policy_map.get(item.severity, sla_policy_map["medium"])["resolution_hours"])
+        if item.status == "open" and item.id not in overdue_ids
     ]
 
     # Batch-fetch all attendance records for today's active assignments in a single query
@@ -156,6 +172,7 @@ def get_dashboard_alerts(
     return success_response(
         "Dashboard alerts fetched successfully",
         {
+            "open_complaints": open_complaints,
             "overdue_complaints": overdue_complaints,
             "missing_attendance": missing_attendance,
             "unpaid_invoices": unpaid_requirements,

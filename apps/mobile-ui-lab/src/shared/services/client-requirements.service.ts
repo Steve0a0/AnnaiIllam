@@ -40,6 +40,8 @@ export type ClientRequirementDetail = {
   budget_amount: number | null;
   notes: string | null;
   status: RequirementStatus;
+  rejection_reason: string | null;
+  cancellation_reason: string | null;
   assignments: Array<{
     id: number;
     worker_profile_id: number;
@@ -105,8 +107,8 @@ export const clientRequirementsService = {
   },
 
   list: async () => {
-    const res = await http.get<Envelope<ClientRequirementListItem[]>>('/client/requirements');
-    return res.data.data;
+    const res = await http.get<Envelope<{ items: ClientRequirementListItem[] }>>('/client/requirements');
+    return res.data.data.items;
   },
 
   getDetail: async (requirementId: number) => {

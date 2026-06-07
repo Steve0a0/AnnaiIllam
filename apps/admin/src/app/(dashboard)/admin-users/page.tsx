@@ -12,17 +12,33 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { adminUsersService, PERMISSION_GROUP_LABELS, type AdminUserRecord } from "@/services/admin-users.service";
 import { scopingService } from "@/services/scoping.service";
+import { peopleService } from "@/services/people.service";
 import { getErrorMessage } from "@/lib/get-error-message";
 import { CreateAdminUserDialog } from "@/features/admin-users";
+import { useAuthStore } from "@/store/auth-store";
 
 export default function AdminUsersPage() {
   const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
+  const currentUser = useAuthStore((s) => s.user);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["admin-users"],
     queryFn: adminUsersService.list,
+    enabled: currentUser?.permission_group === "super_admin",
   });
+
+  if (currentUser && currentUser.permission_group !== "super_admin") {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 text-center">
+        <ShieldCheck className="mb-4 h-10 w-10 text-muted-foreground" />
+        <h2 className="text-base font-semibold text-foreground">Access restricted</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Only super admins can manage admin users.
+        </p>
+      </div>
+    );
+  }
 
   const users: AdminUserRecord[] = data?.data ?? [];
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["admin-users"] });
@@ -72,32 +88,42 @@ export default function AdminUsersPage() {
 function AdminUserRow({ user }: { user: AdminUserRecord }) {
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
-  const [clientIdInput, setClientIdInput] = useState("");
+  const [selectedClientId, setSelectedClientId] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [removingId, setRemovingId] = useState<number | null>(null);
 
   const queryKey = ["admin-scoping", user.id];
 
-  const { data: assignments = [], isLoading } = useQuery({
+  const { data: assignments = [], isLoading: assignmentsLoading } = useQuery({
     queryKey,
     queryFn: () => scopingService.getAssignedClients(user.id),
     enabled: expanded,
   });
 
+  const { data: clientsData, isLoading: clientsLoading } = useQuery({
+    queryKey: ["admin-clients-all"],
+    queryFn: () => peopleService.getClients(),
+    enabled: expanded,
+  });
+
+  const allClients = clientsData?.data?.items ?? [];
+  const assignedIds = new Set(assignments.map((a) => a.client_profile_id));
+  const availableClients = allClients.filter((c) => c.is_active && !assignedIds.has(c.id));
+
   const invalidate = () => queryClient.invalidateQueries({ queryKey });
 
   const handleAdd = async () => {
-    const clientId = parseInt(clientIdInput.trim(), 10);
+    const clientId = parseInt(selectedClientId, 10);
     if (!clientId || clientId < 1) {
-      setAddError("Enter a valid client profile ID.");
+      setAddError("Select a client to assign.");
       return;
     }
     setAddError(null);
     setAdding(true);
     try {
       await scopingService.assignClient(user.id, clientId);
-      setClientIdInput("");
+      setSelectedClientId("");
       invalidate();
     } catch (err) {
       setAddError(getErrorMessage(err));
@@ -158,27 +184,44 @@ function AdminUserRow({ user }: { user: AdminUserRecord }) {
 
       {expanded && !isSuperAdmin && (
         <div className="bg-muted/30 px-5 py-4 space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            Assigned clients
-          </p>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Assigned clients
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              This admin can only see and manage the clients listed below.
+            </p>
+          </div>
 
           {/* Add form */}
           <div className="flex flex-wrap items-center gap-2">
-            <input
-              type="number"
-              min={1}
-              placeholder="Client profile ID"
-              value={clientIdInput}
-              onChange={(e) => { setClientIdInput(e.target.value); setAddError(null); }}
-              className="h-8 w-40 rounded-md border border-input bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            />
-            <Button size="sm" variant="secondary" disabled={adding} onClick={handleAdd}>
-              {adding ? "Adding…" : "Add client"}
-            </Button>
+            {clientsLoading ? (
+              <p className="text-xs text-muted-foreground">Loading clients…</p>
+            ) : availableClients.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">All clients already assigned.</p>
+            ) : (
+              <>
+                <select
+                  value={selectedClientId}
+                  onChange={(e) => { setSelectedClientId(e.target.value); setAddError(null); }}
+                  className="h-8 rounded-md border border-input bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">Select a client…</option>
+                  {availableClients.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.company_name ?? c.contact_name} (#{c.id})
+                    </option>
+                  ))}
+                </select>
+                <Button size="sm" variant="secondary" disabled={adding || !selectedClientId} onClick={handleAdd}>
+                  {adding ? "Adding…" : "Add client"}
+                </Button>
+              </>
+            )}
           </div>
           {addError && <p className="text-xs text-red-600">{addError}</p>}
 
-          {isLoading ? (
+          {assignmentsLoading ? (
             <p className="text-xs text-muted-foreground">Loading…</p>
           ) : assignments.length === 0 ? (
             <p className="text-xs text-muted-foreground">

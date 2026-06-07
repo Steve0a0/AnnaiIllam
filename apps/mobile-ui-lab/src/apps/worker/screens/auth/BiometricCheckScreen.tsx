@@ -35,11 +35,9 @@ export default function BiometricCheckScreen() {
       const isEnrolled  = await LocalAuthentication.isEnrolledAsync();
 
       if (!hasHardware || !isEnrolled) {
-        Alert.alert(
-          'Biometrics unavailable',
-          'Face ID or fingerprint is not set up on this device. Please sign in with OTP.',
-          [{ text: 'Use OTP', onPress: handleUseOtp }],
-        );
+        // Device has no enrolled biometrics — the worker already went through
+        // BiometricSetupScreen which confirmed this. Just let them in silently.
+        setProfileComplete(true);
         return;
       }
 

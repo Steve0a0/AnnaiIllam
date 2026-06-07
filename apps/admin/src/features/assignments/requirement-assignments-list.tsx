@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Check, CheckCircle2, ClipboardList, Plus, RefreshCw, Search, UserCheck } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ClipboardList, RefreshCw, Search } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,20 +34,15 @@ export type ReplacementHint = {
 export default function RequirementAssignmentsList({
   requirementId,
   requiredWorkers,
-  canAddWorkers = false,
-  onAddWorkers,
-  onReplace,
 }: {
   requirementId: number;
   requiredWorkers?: number;
-  canAddWorkers?: boolean;
-  onAddWorkers?: () => void;
-  onReplace?: (hint: ReplacementHint) => void;
 }) {
   const { data, isLoading, isError, error, refetch } =
     useRequirementAssignments(requirementId);
   const queryClient = useQueryClient();
 
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [replaceTargetId, setReplaceTargetId] = useState<number | null>(null);
   const [replaceWorkerId, setReplaceWorkerId] = useState<number | null>(null);
   const [replaceReason, setReplaceReason] = useState("");
@@ -60,6 +55,12 @@ export default function RequirementAssignmentsList({
     queryKey: ["worker-matches", requirementId],
     queryFn: () => assignmentsService.getWorkerMatches(requirementId),
     enabled: !!replaceTargetId,
+  });
+
+  const { data: coverageData } = useQuery({
+    queryKey: ["coverage-calendar", requirementId],
+    queryFn: () => assignmentsService.getCoverageCalendar(requirementId),
+    staleTime: 30_000,
   });
 
   const allMatches = matchesData?.data ?? [];
@@ -76,6 +77,10 @@ export default function RequirementAssignmentsList({
           )
         : assignableMatches,
     [assignableMatches, normalizedReplaceQuery],
+  );
+  const groupedAssignments = useMemo(
+    () => groupAssignments(data?.data ?? []),
+    [data],
   );
 
   function handleOpenReplace(assignmentId: number) {
@@ -113,6 +118,9 @@ export default function RequirementAssignmentsList({
       await queryClient.invalidateQueries({
         queryKey: ["worker-matches", requirementId],
       });
+      await queryClient.invalidateQueries({
+        queryKey: ["coverage-calendar", requirementId],
+      });
       refetch();
     } catch (err) {
       setReplaceMessage(getErrorMessage(err));
@@ -130,78 +138,61 @@ export default function RequirementAssignmentsList({
   }
 
   const assignments = data?.data || [];
-  // Only count workers who have confirmed (accepted/active/completed) — not just invited
-  const confirmedAssignments = assignments.filter((item) =>
-    ["accepted", "active", "completed"].includes(item.status),
-  );
-  const pendingAssignments = assignments.filter(
-    (item) => item.status === "assigned",
-  );
-  const assignedCount = confirmedAssignments.length;
-  const neededCount = Math.max((requiredWorkers ?? assignedCount) - assignedCount, 0);
-  const isComplete = neededCount === 0 && (requiredWorkers ?? 0) > 0;
+  const pendingAssignments = assignments.filter((item) => item.status === "assigned");
 
-  const progressPercent = requiredWorkers
-    ? Math.min(100, Math.round((assignedCount / requiredWorkers) * 100))
-    : confirmedAssignments.length
-      ? 100
-      : 0;
+  const coverageDays = coverageData?.data?.days ?? [];
+  const totalDays = coverageDays.length;
+  const fullDays = coverageDays.filter((d) => d.coverage_status === "full").length;
+  const partialDays = coverageDays.filter((d) => d.coverage_status === "partial").length;
+  const uncoveredDays = coverageDays.filter((d) => d.coverage_status === "uncovered").length;
+  const dayProgressPercent = totalDays > 0 ? Math.round((fullDays / totalDays) * 100) : 0;
+  const allDaysCovered = totalDays > 0 && fullDays === totalDays;
 
   return (
-    <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-      <div className="border-b border-border bg-[#FAFAF9] px-5 py-5">
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-          <div className="flex min-w-0 flex-1 items-start gap-4">
-            <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[#EDFAF3] text-[#1A6640]">
-              {isComplete ? (
-                <CheckCircle2 className="size-5" />
-              ) : (
-                <UserCheck className="size-5" />
-              )}
-            </div>
-            <div className="min-w-0 flex-1">
-              <h3 className="font-display text-xl font-semibold text-foreground">
-                Assignment progress
-              </h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {requiredWorkers
-                  ? `${assignedCount} of ${requiredWorkers} workers confirmed`
-                  : `${assignedCount} workers confirmed`}
-                {pendingAssignments.length > 0
-                  ? ` · ${pendingAssignments.length} awaiting response`
-                  : ""}
-              </p>
-              <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#E7E5E4]">
+    <section className="overflow-hidden rounded-xl border border-[oklch(0.90_0.003_145)] bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[oklch(0.90_0.003_145)] px-5 py-4">
+        <div className="flex min-w-0 flex-1 items-center gap-5">
+          <div>
+            <p className="text-[14px] font-semibold text-[oklch(0.20_0.006_145)]">Day coverage</p>
+            <p className="mt-0.5 text-[13px] text-[oklch(0.44_0.005_145)]">
+              {totalDays > 0
+                ? `${fullDays} of ${totalDays} days fully covered`
+                : `${assignments.length} worker${assignments.length !== 1 ? "s" : ""} assigned`}
+              {pendingAssignments.length > 0
+                ? ` · ${pendingAssignments.length} awaiting response`
+                : ""}
+            </p>
+          </div>
+          {totalDays > 0 && (
+            <div className="hidden min-w-0 flex-1 flex-col sm:flex" style={{ maxWidth: 160 }}>
+              <div className="h-1.5 overflow-hidden rounded-full bg-[oklch(0.90_0.003_145)]">
                 <div
-                  className="h-full rounded-full bg-[#1A6640] transition-all"
-                  style={{ width: `${progressPercent}%` }}
+                  className="h-full rounded-full bg-[oklch(0.42_0.115_145)] transition-all"
+                  style={{ width: `${dayProgressPercent}%` }}
                 />
               </div>
+              <p className="mt-1 font-mono text-[11px] text-[oklch(0.48_0.005_145)]">{dayProgressPercent}%</p>
             </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <div
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-2.5">
+          {totalDays > 0 && (
+            <span
               className={
-                isComplete
-                  ? "rounded-full bg-[#DCFCE7] px-3 py-1 text-xs font-medium text-[#15803D]"
-                  : "rounded-full bg-[#FEF3C7] px-3 py-1 text-xs font-medium text-[#B45309]"
+                allDaysCovered
+                  ? "rounded-full bg-[oklch(0.91_0.026_145)] px-2.5 py-1 text-[12px] font-medium text-[oklch(0.34_0.094_145)]"
+                  : uncoveredDays > 0
+                    ? "rounded-full bg-[#FEE2E2] px-2.5 py-1 text-[12px] font-medium text-[#B91C1C]"
+                    : "rounded-full bg-[#FEF3C7] px-2.5 py-1 text-[12px] font-medium text-[#B45309]"
               }
             >
-              {isComplete ? "Assignment complete" : `${neededCount} more needed`}
-            </div>
-            {canAddWorkers ? (
-              <Button
-                type="button"
-                variant="accent"
-                size="sm"
-                onClick={onAddWorkers}
-              >
-                <Plus className="size-4" />
-                Add Workers
-              </Button>
-            ) : null}
-          </div>
+              {allDaysCovered
+                ? "All days covered"
+                : uncoveredDays > 0
+                  ? `${uncoveredDays} day${uncoveredDays !== 1 ? "s" : ""} uncovered`
+                  : `${partialDays} day${partialDays !== 1 ? "s" : ""} partial`}
+            </span>
+          )}
         </div>
       </div>
 
@@ -219,134 +210,216 @@ export default function RequirementAssignmentsList({
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="min-w-[1180px] table-fixed">
+          <table className="min-w-[820px] table-fixed">
             <colgroup>
-              <col className="w-[120px]" />
-              <col className="w-[210px]" />
-              <col className="w-[150px]" />
-              <col className="w-[170px]" />
-              <col className="w-[160px]" />
-              <col className="w-[110px]" />
-              <col className="w-[120px]" />
-              <col className="w-[260px]" />
+              <col className="w-[220px]" />
+              <col className="w-[200px]" />
+              <col className="w-[130px]" />
+              <col className="w-[100px]" />
+              <col className="w-[130px]" />
+              <col />
             </colgroup>
-            <thead className="bg-[#FAFAF9]">
-              <tr className="border-b border-border">
-                <TableHead>Assignment</TableHead>
+            <thead className="bg-[oklch(0.97_0.008_145)]">
+              <tr className="border-b border-[oklch(0.90_0.003_145)]">
                 <TableHead>Worker</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Shift</TableHead>
+                <TableHead>Role &amp; shift</TableHead>
                 <TableHead>Dates</TableHead>
-                <TableHead>Payout</TableHead>
+                <TableHead>Pay</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="text-right">Manage</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </tr>
             </thead>
 
             <tbody>
-              {assignments.map((item) => (
-                <tr
-                  key={item.id}
-                  className="border-b border-muted transition hover:bg-[#FAFAF9] last:border-b-0"
-                >
-                  <td className="align-middle whitespace-nowrap px-4 py-4">
-                    <div className="font-mono text-sm font-medium text-foreground">
-                      ASN-{item.id}
-                    </div>
-                  </td>
-                  <td className="align-middle px-4 py-4 text-sm">
-                    <div className="truncate font-medium text-foreground">
-                      {item.worker_name}
-                    </div>
-                    <div className="mt-1 truncate text-xs text-muted-foreground">
-                      #{item.worker_profile_id}
-                      {item.worker_city ? ` - ${item.worker_city}` : ""}
-                    </div>
-                  </td>
-                  <td className="align-middle px-4 py-4 text-sm text-foreground">
-                    <span className="block truncate">
-                      {item.assigned_role || "-"}
-                    </span>
-                  </td>
-                  <td className="align-middle px-4 py-4 text-sm text-foreground">
-                    <span className="block truncate">
-                      {item.assigned_shift || "-"}
-                    </span>
-                  </td>
-                  <td className="align-middle px-4 py-4 font-mono text-xs text-foreground">
-                    {item.start_date ? (
-                      <span>
-                        {formatShortDate(item.start_date)}
-                        {item.end_date ? (
-                          <><br /><span className="text-muted-foreground">→ {formatShortDate(item.end_date)}</span></>
-                        ) : null}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground text-xs">Full req.</span>
-                    )}
-                  </td>
-                  <td className="align-middle whitespace-nowrap px-4 py-4 font-mono text-sm text-foreground">
-                    {item.salary_amount
-                      ? `Rs. ${item.salary_amount.toLocaleString("en-IN")}`
-                      : "-"}
-                  </td>
-                  <td className="align-middle px-4 py-4 text-sm">
-                    <div className="flex flex-col gap-1">
-                      <StatusBadge value={item.status} />
-                      {item.status === "assigned" &&
-                        item.response_deadline &&
-                        new Date(item.response_deadline) < new Date() ? (
-                          <span className="whitespace-nowrap rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700">
-                            Response overdue
+              {groupedAssignments.map((group) => {
+                const isExpanded = expandedGroups.has(group.key);
+                const isMulti = group.assignments.length > 1;
+                return (
+                  <>
+                    {/* Group summary row */}
+                    <tr
+                      key={group.key}
+                      className="border-b border-[oklch(0.95_0.013_145)] transition hover:bg-[oklch(0.97_0.008_145)]"
+                    >
+                      <td className="px-4 py-3.5 align-middle">
+                        <div className="flex items-center gap-2.5">
+                          {isMulti && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedGroups((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(group.key)) next.delete(group.key);
+                                  else next.add(group.key);
+                                  return next;
+                                })
+                              }
+                              className="shrink-0 rounded p-0.5 text-[oklch(0.44_0.005_145)] hover:bg-[oklch(0.91_0.026_145)]"
+                            >
+                              {isExpanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                            </button>
+                          )}
+                          <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[oklch(0.91_0.026_145)] text-[12px] font-semibold text-[oklch(0.34_0.094_145)]">
+                            {group.worker_name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-[14px] font-semibold text-[oklch(0.20_0.006_145)]">
+                              {group.worker_name}
+                            </p>
+                            <p className="font-mono text-[11px] text-[oklch(0.48_0.005_145)]">
+                              {group.worker_city ?? ""}
+                              {isMulti ? ` · ${group.assignments.length} days` : group.worker_city ? "" : ""}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5 align-middle">
+                        <p className="truncate text-[13px] text-[oklch(0.20_0.006_145)]">
+                          {group.assignments[0].assigned_role || "—"}
+                        </p>
+                        {group.assignments[0].assigned_shift && (
+                          <p className="mt-0.5 truncate text-[12px] text-[oklch(0.44_0.005_145)]">
+                            {group.assignments[0].assigned_shift}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5 align-middle">
+                        {isMulti ? (
+                          <div className="flex flex-nowrap items-center gap-1">
+                            {group.assignments.slice(0, 3).map((a) => (
+                              <span
+                                key={a.id}
+                                className="rounded-md bg-[oklch(0.91_0.026_145)] px-1.5 py-0.5 font-mono text-[11px] font-medium text-[oklch(0.34_0.094_145)]"
+                              >
+                                {formatShortDate(a.start_date ?? "")}
+                              </span>
+                            ))}
+                            {group.assignments.length > 3 && (
+                              <span className="rounded-md bg-[oklch(0.95_0.013_145)] px-1.5 py-0.5 font-mono text-[11px] text-[oklch(0.48_0.005_145)]">
+                                +{group.assignments.length - 3}
+                              </span>
+                            )}
+                          </div>
+                        ) : group.earliestStart ? (
+                          <span className="font-mono text-[12px] text-[oklch(0.20_0.006_145)]">
+                            {formatShortDate(group.earliestStart)}
                           </span>
-                        ) : null}
-                    </div>
-                  </td>
-                  <td className="align-middle px-4 py-4 text-right text-sm">
-                    <div className="flex items-center justify-end gap-3">
-                      <UpdateAssignmentStatus
-                        assignmentId={item.id}
-                        currentStatus={item.status}
-                        onSuccess={() => refetch()}
-                      />
-                      {item.status === "assigned" ||
-                      item.status === "accepted" ||
-                      item.status === "active" ? (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => handleOpenReplace(item.id)}
-                          title="Replace this worker with another"
-                        >
-                          <RefreshCw className="size-3.5" />
-                          Replace
-                        </Button>
-                      ) : null}
-                      {canAddWorkers &&
-                        onReplace &&
-                        (item.status === "declined" || item.status === "cancelled") ? (
-                          <Button
+                        ) : (
+                          <span className="font-mono text-[12px] text-[oklch(0.62_0.004_145)]">Full req.</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5 align-middle font-mono">
+                        <span className="text-[13px] text-[oklch(0.20_0.006_145)]">
+                          {group.assignments[0].salary_amount
+                            ? `₹${group.assignments[0].salary_amount.toLocaleString("en-IN")}`
+                            : "—"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 align-middle">
+                        <StatusBadge value={group.status} />
+                      </td>
+                      <td className="px-4 py-3.5 align-middle text-right">
+                        {!isMulti && (
+                          <div className="flex items-center justify-end gap-2">
+                            <UpdateAssignmentStatus
+                              assignmentId={group.assignments[0].id}
+                              currentStatus={group.assignments[0].status}
+                              onSuccess={() => {
+                                refetch();
+                                queryClient.invalidateQueries({ queryKey: ["coverage-calendar", requirementId] });
+                              }}
+                            />
+                            {["assigned", "accepted", "active"].includes(group.assignments[0].status) && (
+                              <Button type="button" variant="ghost" size="sm" onClick={() => handleOpenReplace(group.assignments[0].id)} title="Replace">
+                                <RefreshCw className="size-3.5" />
+                              </Button>
+                            )}
+                            <Link href={`/assignments/${group.assignments[0].id}`} className="whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-[oklch(0.42_0.115_145)] transition hover:bg-[oklch(0.95_0.013_145)]">
+                              Attendance
+                            </Link>
+                          </div>
+                        )}
+                        {isMulti && (
+                          <button
                             type="button"
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => onReplace(buildHint(item))}
-                            title="Open assignment form pre-filled with this worker's slot"
+                            onClick={() =>
+                              setExpandedGroups((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(group.key)) next.delete(group.key);
+                                else next.add(group.key);
+                                return next;
+                              })
+                            }
+                            className="text-[12px] font-medium text-[oklch(0.42_0.115_145)] hover:underline"
                           >
-                            <RefreshCw className="size-3.5" />
-                            Replace
-                          </Button>
-                        ) : null}
-                      <Link
-                        href={`/assignments/${item.id}`}
-                        className="whitespace-nowrap rounded-lg px-2 py-1 text-xs font-medium text-primary hover:bg-[#EDFAF3]"
+                            {isExpanded ? "Collapse" : `Show ${group.assignments.length} rows`}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+
+                    {/* Expanded individual sub-rows */}
+                    {isMulti && isExpanded && group.assignments.map((item) => (
+                      <tr
+                        key={item.id}
+                        className="border-b border-[oklch(0.95_0.013_145)] bg-[oklch(0.97_0.008_145)] transition hover:bg-[oklch(0.95_0.013_145)]"
                       >
-                        Attendance
-                      </Link>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                        <td className="py-2.5 pl-14 pr-4 align-middle">
+                          <p className="font-mono text-[11px] text-[oklch(0.48_0.005_145)]">
+                            ASN-{item.id}
+                          </p>
+                        </td>
+                        <td className="px-4 py-2.5 align-middle" />
+                        <td className="px-4 py-2.5 align-middle font-mono">
+                          {item.start_date ? (
+                            <p className="text-[12px] text-[oklch(0.20_0.006_145)]">
+                              {formatShortDate(item.start_date)}
+                              {item.end_date && item.end_date !== item.start_date
+                                ? ` – ${formatShortDate(item.end_date)}`
+                                : ""}
+                            </p>
+                          ) : (
+                            <span className="text-[12px] text-[oklch(0.62_0.004_145)]">Full req.</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 align-middle font-mono">
+                          <span className="text-[12px] text-[oklch(0.48_0.005_145)]">
+                            {item.salary_amount ? `₹${item.salary_amount.toLocaleString("en-IN")}` : "—"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 align-middle">
+                          <div className="flex flex-col gap-1">
+                            <StatusBadge value={item.status} />
+                            {item.status === "assigned" && item.response_deadline && new Date(item.response_deadline) < new Date() ? (
+                              <span className="whitespace-nowrap rounded-full bg-[#FEE2E2] px-2 py-0.5 text-[10px] font-semibold text-[#B91C1C]">Response overdue</span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 align-middle text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <UpdateAssignmentStatus
+                              assignmentId={item.id}
+                              currentStatus={item.status}
+                              onSuccess={() => {
+                                refetch();
+                                queryClient.invalidateQueries({ queryKey: ["coverage-calendar", requirementId] });
+                              }}
+                            />
+                            {["assigned", "accepted", "active"].includes(item.status) && (
+                              <Button type="button" variant="ghost" size="sm" onClick={() => handleOpenReplace(item.id)} title="Replace">
+                                <RefreshCw className="size-3.5" />
+                              </Button>
+                            )}
+                            <Link href={`/assignments/${item.id}`} className="whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-[oklch(0.42_0.115_145)] transition hover:bg-[oklch(0.95_0.013_145)]">
+                              Attendance
+                            </Link>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -471,6 +544,53 @@ export default function RequirementAssignmentsList({
   );
 }
 
+type AssignmentGroup = {
+  key: string;
+  worker_profile_id: number;
+  worker_name: string;
+  worker_city: string | null;
+  assignments: AssignmentItem[];
+  earliestStart: string | null;
+  latestEnd: string | null;
+  status: string;
+};
+
+function groupAssignments(items: AssignmentItem[]): AssignmentGroup[] {
+  // Sort by worker name then date so same-worker assignments are adjacent
+  const sorted = [...items].sort((a, b) => {
+    const nameCompare = a.worker_name.localeCompare(b.worker_name);
+    if (nameCompare !== 0) return nameCompare;
+    return (a.start_date ?? "").localeCompare(b.start_date ?? "");
+  });
+  const groups: AssignmentGroup[] = [];
+  for (const item of sorted) {
+    const last = groups[groups.length - 1];
+    // Group all assignments for the same worker+status together (not just consecutive)
+    const sameGroup =
+      last &&
+      last.worker_profile_id === item.worker_profile_id &&
+      last.status === item.status;
+    if (sameGroup) {
+      last.assignments.push(item);
+      if (item.end_date && (!last.latestEnd || item.end_date > last.latestEnd)) {
+        last.latestEnd = item.end_date;
+      }
+    } else {
+      groups.push({
+        key: `${item.worker_profile_id}-${item.status}-${groups.length}`,
+        worker_profile_id: item.worker_profile_id,
+        worker_name: item.worker_name,
+        worker_city: item.worker_city,
+        assignments: [item],
+        earliestStart: item.start_date,
+        latestEnd: item.end_date,
+        status: item.status,
+      });
+    }
+  }
+  return groups;
+}
+
 function isAssignableWorker(worker: WorkerMatch) {
   return (
     worker.is_available &&
@@ -478,16 +598,6 @@ function isAssignableWorker(worker: WorkerMatch) {
     !worker.reasons.some((reason) => reason.startsWith("not available")) &&
     !worker.conflict
   );
-}
-
-function buildHint(item: AssignmentItem): ReplacementHint {
-  return {
-    assignedRole: item.assigned_role,
-    assignedShift: item.assigned_shift,
-    startDate: item.start_date,
-    endDate: item.end_date,
-    salaryAmount: item.salary_amount,
-  };
 }
 
 function formatShortDate(value: string) {
@@ -508,7 +618,7 @@ function TableHead({
   return (
     <th
       scope="col"
-      className={`whitespace-nowrap px-4 py-3 text-left text-[13px] font-medium text-muted-foreground ${className}`}
+      className={`whitespace-nowrap px-4 py-2.5 text-left text-[12px] font-medium text-[oklch(0.48_0.005_145)] ${className}`}
     >
       {children}
     </th>

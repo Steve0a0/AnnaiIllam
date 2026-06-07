@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 _FAST2SMS_URL = "https://www.fast2sms.com/dev/bulkV2"
 
-_EXPO_PUSH_URL = "https://exp.host/push/send"
+_EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 _EXPO_HEADERS = {
     "Accept": "application/json",
     "Accept-Encoding": "gzip, deflate",

@@ -16,6 +16,7 @@ import logging
 from abc import ABC, abstractmethod
 
 import httpx
+from fastapi import HTTPException
 
 from app.core.config import settings
 
@@ -57,9 +58,22 @@ class Msg91Provider(BaseSmsProvider):
                 resp = client.post(self._API_URL, params=params)
                 resp.raise_for_status()
                 logger.info("MSG91 OTP sent | phone=%s | status=%s", phone, resp.status_code)
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "MSG91 OTP send failed | phone=%s | status=%s",
+                phone,
+                exc.response.status_code,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="SMS service temporarily unavailable. Please try again shortly.",
+            ) from exc
         except Exception:
             logger.exception("MSG91 OTP send failed | phone=%s", phone)
-            raise
+            raise HTTPException(
+                status_code=503,
+                detail="SMS service temporarily unavailable. Please try again shortly.",
+            )
 
 
 class Fast2SmsProvider(BaseSmsProvider):
@@ -86,9 +100,22 @@ class Fast2SmsProvider(BaseSmsProvider):
                 if not body.get("return", False):
                     raise RuntimeError(f"Fast2SMS error: {body.get('message', body)}")
                 logger.info("Fast2SMS OTP sent | phone=%s", phone)
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Fast2SMS OTP send failed | phone=%s | status=%s",
+                phone,
+                exc.response.status_code,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="SMS service temporarily unavailable. Please try again shortly.",
+            ) from exc
         except Exception:
             logger.exception("Fast2SMS OTP send failed | phone=%s", phone)
-            raise
+            raise HTTPException(
+                status_code=503,
+                detail="SMS service temporarily unavailable. Please try again shortly.",
+            )
 
 
 class ConsoleProvider(BaseSmsProvider):

@@ -15,7 +15,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { ProfileStackParamList } from '../navigation/types';
 import { pushTokenService } from '../../../shared/services/push-token.service';
 import {
   Building2,
@@ -23,6 +25,7 @@ import {
   LogOut,
   MapPin,
   Pencil,
+  ReceiptText,
   Shield,
   Sliders,
   Trash2,
@@ -51,6 +54,7 @@ const INDUSTRIES = [
 
 export default function ClientProfileScreen() {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<NativeStackNavigationProp<ProfileStackParamList>>();
   const clearAuth = useAuthStore((s) => s.clearAuth);
   const [profile, setProfile] = useState<ClientProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -180,6 +184,15 @@ export default function ClientProfileScreen() {
               ) : null}
             </InfoCard>
 
+            <SectionLabel icon={<ReceiptText size={13} color={C.muted} />} label="Billing" />
+            <InfoCard>
+              <Pressable style={s.actionRow} onPress={() => navigation.navigate('BillingOverview')}>
+                <ReceiptText size={15} color={C.body} />
+                <Text style={s.actionLabel}>My Invoices &amp; Payments</Text>
+                <ChevronRight size={15} color={C.muted} />
+              </Pressable>
+            </InfoCard>
+
             <SectionLabel icon={<Shield size={13} color={C.muted} />} label="Account" />
             <InfoCard>
               <Pressable style={s.actionRow} onPress={logout}>
@@ -301,7 +314,7 @@ function EditSheet({ profile, visible, onClose, onSaved }: {
     setIsSaving(true);
     try {
       const patch: ClientProfilePatch = {
-        company_name: form.company_name.trim(),
+        company_name: form.company_name.trim() || null,
         contact_name: form.contact_name.trim(),
         city: form.city.trim(), state: form.state.trim(),
         address: form.address.trim() || null,
