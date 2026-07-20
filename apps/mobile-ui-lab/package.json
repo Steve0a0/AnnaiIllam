@@ -62,5 +62,8 @@
     "jest-expo": "~54.0.17",
     "typescript": "~5.9.2"
   },
+  "overrides": {
+    "ws": "8.21.1"
+  },
   "private": true
 }

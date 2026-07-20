@@ -41,7 +41,7 @@ The production audit completed on 2026-07-20 supersedes older readiness claims w
 
 | Historical item | Current status | Reason | Replacement ticket |
 |---|---|---|---|
-| GitHub Actions backend/admin CI | NEEDS_REVIEW | Current Ruff/ESLint/admin build fail; admin CI uses the wrong API env name, backend CI lacks Redis, and mobile CI is absent | PROD-002 |
+| GitHub Actions release gates | NEEDS_REVIEW | Backend/admin/mobile/security workflows are registered; follow-up CI/dependency fixes need a GitHub rerun, and current Ruff/ESLint/admin build/mobile TypeScript debt remains | PROD-002, PROD-008, PROD-019, PROD-020 |
 | Feature 4: No-Show / Absent Worker Handling | NEEDS_REVIEW | Scheduler can run in every API worker and can evaluate before shift/grace time | PROD-009, PROD-010 |
 | HARD-1: Environment & Secrets Audit | NEEDS_REVIEW | Production secrets management and Docker build-context exclusion are missing | PROD-031, PROD-033 |
 | HARD-2: CORS & Security Headers | NEEDS_REVIEW | API headers exist; admin headers and browser session hardening remain open | PROD-016, PROD-017 |

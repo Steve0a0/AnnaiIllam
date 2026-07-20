@@ -171,9 +171,12 @@ Verification:
 
 - All workflow and Dependabot YAML files parse successfully.
 - `git diff --check` passes.
+- The first `production-hardening` GitHub Actions run registered all required check names. Both CodeQL jobs passed; dependency review correctly skipped because the event was a branch push rather than a pull request.
+- The first run exposed a Redis health-command quoting defect and high/critical npm advisories. The follow-up fixes the Redis option, updates the admin/mobile lockfiles, pins patched Next.js, and overrides the vulnerable transitive mobile `ws` release.
+- The exact admin and mobile production audit commands now exit successfully with no high or critical advisories. A GitHub rerun is required to verify the pushed result.
 - Docker 29.6.1 is available, but local image builds were not run because PROD-031 has not yet excluded local environment files from Docker build contexts.
 - Existing Ruff, admin lint/build, and mobile TypeScript failures are expected to keep the new gates red until PROD-008, PROD-019, and PROD-020 are resolved.
 
 Remaining acceptance step:
 
-- Push the workflows, let them register their check names, and activate the `main`/`develop` GitHub ruleset. No GitHub CLI or authenticated token is available in this workspace, so this server-side setting cannot be applied locally. Keep PROD-002 at `NEEDS_REVIEW` until the ruleset and a blocked-merge test pull request are evidenced.
+- Push the follow-up fixes, rerun the workflows, and activate the `main`/`develop` GitHub ruleset with the registered check names. No GitHub CLI or authenticated token is available in this workspace, so this server-side setting cannot be applied locally. Keep PROD-002 at `NEEDS_REVIEW` until the ruleset and a blocked-merge test pull request are evidenced.
