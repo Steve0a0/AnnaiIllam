@@ -1,4 +1,5 @@
-import { Platform } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Platform, View } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { House, MessageCircleWarning, User } from 'lucide-react-native';
@@ -11,13 +12,15 @@ import RequestsScreen from '../screens/RequestsScreen';
 import ComplaintsScreen from '../screens/ComplaintsScreen';
 import RaiseComplaintScreen from '../screens/RaiseComplaintScreen';
 import ComplaintDetailScreen from '../screens/ComplaintDetailScreen';
-import ClientProfileScreen from '../screens/ClientProfileScreen';
+import ClientProfileScreen, { AddPhoneSheet } from '../screens/ClientProfileScreen';
 import BillingOverviewScreen from '../screens/BillingOverviewScreen';
 import InvoiceViewerScreen from '../screens/InvoiceViewerScreen';
 import InvoiceDetailScreen from '../screens/InvoiceDetailScreen';
 import PaymentConfirmScreen from '../screens/PaymentConfirmScreen';
 import RateRequirementScreen from '../screens/RateRequirementScreen';
 import DisputeScreen from '../screens/DisputeScreen';
+import { clientProfileService } from '../../../shared/services/client-profile.service';
+import { useAuthStore } from '../../../shared/store/auth.store';
 
 import type {
   ClientTabParamList,
@@ -76,47 +79,85 @@ function ProfileStackNavigator() {
 }
 
 export default function AppNavigator() {
+  const user = useAuthStore((s) => s.user);
+  const [needsPhone, setNeedsPhone] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    const checkPhone = async () => {
+      if (user?.phone) {
+        setNeedsPhone(false);
+        return;
+      }
+
+      try {
+        const profile = await clientProfileService.getProfile();
+        if (active) setNeedsPhone(!profile.phone);
+      } catch {
+        if (active) setNeedsPhone(false);
+      }
+    };
+
+    checkPhone();
+
+    return () => {
+      active = false;
+    };
+  }, [user?.phone]);
+
   return (
-    <Tab.Navigator
-      screenOptions={({ route }) => ({
-        headerShown: false,
-        tabBarStyle: {
-          backgroundColor: C.card,
-          borderTopColor: C.neutral200,
-          borderTopWidth: 0.5,
-          height: Platform.OS === 'ios' ? 84 : 64,
-          paddingBottom: Platform.OS === 'ios' ? 28 : 10,
-          paddingTop: 8,
-        },
-        tabBarActiveTintColor: C.brand600,
-        tabBarInactiveTintColor: C.neutral500,
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '500',
-        },
-        tabBarIcon: ({ color, size }) => {
-          if (route.name === 'HomeTab') return <House size={size} color={color} />;
-          if (route.name === 'ComplaintsTab') return <MessageCircleWarning size={size} color={color} />;
-          if (route.name === 'ProfileTab') return <User size={size} color={color} />;
-          return null;
-        },
-      })}
-    >
-      <Tab.Screen
-        name="HomeTab"
-        component={HomeStackNavigator}
-        options={{ tabBarLabel: 'Home' }}
+    <View style={{ flex: 1 }}>
+      <Tab.Navigator
+        screenOptions={({ route }) => ({
+          headerShown: false,
+          tabBarStyle: {
+            backgroundColor: C.card,
+            borderTopColor: C.neutral200,
+            borderTopWidth: 0.5,
+            height: Platform.OS === 'ios' ? 84 : 64,
+            paddingBottom: Platform.OS === 'ios' ? 28 : 10,
+            paddingTop: 8,
+          },
+          tabBarActiveTintColor: C.brand600,
+          tabBarInactiveTintColor: C.neutral500,
+          tabBarLabelStyle: {
+            fontSize: 11,
+            fontWeight: '500',
+          },
+          tabBarIcon: ({ color, size }) => {
+            if (route.name === 'HomeTab') return <House size={size} color={color} />;
+            if (route.name === 'ComplaintsTab') return <MessageCircleWarning size={size} color={color} />;
+            if (route.name === 'ProfileTab') return <User size={size} color={color} />;
+            return null;
+          },
+        })}
+      >
+        <Tab.Screen
+          name="HomeTab"
+          component={HomeStackNavigator}
+          options={{ tabBarLabel: 'Home' }}
+        />
+        <Tab.Screen
+          name="ComplaintsTab"
+          component={ComplaintsStackNavigator}
+          options={{ tabBarLabel: 'Complaints' }}
+        />
+        <Tab.Screen
+          name="ProfileTab"
+          component={ProfileStackNavigator}
+          options={{ tabBarLabel: 'Profile' }}
+        />
+      </Tab.Navigator>
+
+      <AddPhoneSheet
+        visible={needsPhone}
+        required
+        title="Verify phone number"
+        subtitle="Add your mobile number to secure this account and receive job updates. We will send a 6-digit OTP to verify it."
+        onClose={() => undefined}
+        onSaved={() => setNeedsPhone(false)}
       />
-      <Tab.Screen
-        name="ComplaintsTab"
-        component={ComplaintsStackNavigator}
-        options={{ tabBarLabel: 'Complaints' }}
-      />
-      <Tab.Screen
-        name="ProfileTab"
-        component={ProfileStackNavigator}
-        options={{ tabBarLabel: 'Profile' }}
-      />
-    </Tab.Navigator>
+    </View>
   );
 }

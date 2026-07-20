@@ -13,7 +13,44 @@ Use this as the day-to-day Jira-style project board. Use `MVP_SCOPE.md` and `ROA
 - `BLOCKED` - Cannot proceed until the blocker is removed.
 - `OUT_OF_SCOPE` - Not part of MVP unless explicitly requested.
 
-## Current Focus
+## Production Hardening Current Focus
+
+The production audit completed on 2026-07-20 supersedes older readiness claims when current code or verification evidence conflicts with them. The detailed execution board is `docs/PRODUCTION_HARDENING_TRACKER.md`.
+
+| Field | Value |
+|---|---|
+| Current phase | `Production Hardening — Gate 0 complete` |
+| Current priority | Close audited P0 security, payment, scheduler, build, mobile-release, and compliance blockers |
+| Next work | Execute `PROD-003` public user-directory fix and `PROD-002` release gates |
+| Release branch | `production-hardening` |
+| Feature freeze | Active; no unrelated product features on the release branch |
+| Last updated | 2026-07-20 |
+
+### Production Hardening Queue
+
+| Priority | Status | Task | App | Notes |
+|---|---|---|---|---|
+| P0 | DONE | PROD-001: Create production hardening release baseline | All/Docs | Branch, freeze, role owners, approval matrix, verified failing gates, audit corrections, and PROD-001–046 register documented |
+| P0 | TODO | PROD-003: Remove unauthenticated user-directory disclosure | Backend | First critical implementation ticket; protect or remove `GET /api/v1/users` and add authorization tests |
+| P0 | NEEDS_REVIEW | PROD-002: Establish mandatory release gates | All/CI | Workflows, scans, pinned runtimes, required-check list, and PR template are implemented; activate the documented GitHub ruleset after checks register |
+| P0 | TODO | PROD-004–006: Repair payment invariants and processing | Backend/Finance | Eliminate client-controlled authoritative amount and make verification/webhooks transactional |
+| P0 | TODO | PROD-009–011: Repair scheduler, no-show timing, and timezones | Backend/DevOps | Separate singleton scheduler and use India business dates |
+| P0 | TODO | PROD-008/019/020: Restore release gates | Backend/Admin/Mobile | Fix Ruff, admin lint/build, and mobile TypeScript failures |
+
+### Audit Status Reclassification
+
+| Historical item | Current status | Reason | Replacement ticket |
+|---|---|---|---|
+| GitHub Actions backend/admin CI | NEEDS_REVIEW | Current Ruff/ESLint/admin build fail; admin CI uses the wrong API env name, backend CI lacks Redis, and mobile CI is absent | PROD-002 |
+| Feature 4: No-Show / Absent Worker Handling | NEEDS_REVIEW | Scheduler can run in every API worker and can evaluate before shift/grace time | PROD-009, PROD-010 |
+| HARD-1: Environment & Secrets Audit | NEEDS_REVIEW | Production secrets management and Docker build-context exclusion are missing | PROD-031, PROD-033 |
+| HARD-2: CORS & Security Headers | NEEDS_REVIEW | API headers exist; admin headers and browser session hardening remain open | PROD-016, PROD-017 |
+| HARD-3: Database Security & Indexes | NEEDS_REVIEW | Historical 763/763 is not a current release result; constraints and retention remain open | PROD-012, PROD-039 |
+| HARD-4: Error Handling & Logging | NEEDS_REVIEW | Backend lint exposes a runtime defect; audit/PII integrity remains open | PROD-008, PROD-018 |
+| PERF-2 load test | NEEDS_REVIEW | Historical local evidence is not production capacity proof | PROD-042 |
+| MOBILE-2 push delivery | NEEDS_REVIEW | Payload wiring exists, but physical-device delivery is unverified | PROD-035, PROD-041 |
+
+## Historical MVP Focus (superseded 2026-07-20)
 
 | Field | Value |
 |---|---|

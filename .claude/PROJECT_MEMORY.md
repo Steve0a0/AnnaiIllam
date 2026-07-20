@@ -52,6 +52,7 @@
 - Expo SDK 54, React Native 0.81.5, React 19, New Architecture enabled.
 - App variant selected by `EXPO_PUBLIC_APP_VARIANT` env var (`client` | `worker`). Entry: `App.tsx` → `ClientApp` or `WorkerApp`.
 - Scripts: `npm run clients` or `npm run worker` to start each variant.
+- Google sign-in uses `expo-auth-session/providers/google`; native redirects use the app bundle/package scheme (`com.annaiillam:/oauthredirect`), so `apps/mobile-ui-lab/app.json` must register `com.annaiillam` alongside the public `annai-illam` scheme.
 - Secure token storage via `expo-secure-store`. Keys prefixed: `client_*` vs `worker_*`.
 - Worker app has biometric (Face ID/Touch ID) per-session auth via `expo-local-authentication`.
 - Worker onboarding is multi-stage: phone OTP → consent → ID/selfie S3 upload → build profile → under review (admin approves) → biometric setup → app.

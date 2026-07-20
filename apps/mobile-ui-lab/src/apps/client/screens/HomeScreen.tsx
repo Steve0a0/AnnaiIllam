@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import { AlertCircle, ArrowRight, Bell, BriefcaseBusiness, CheckCircle, ChevronRight, Clock, CreditCard, Plus, Star, Users } from 'lucide-react-native';
+import { AlertCircle, ArrowRight, BriefcaseBusiness, CheckCircle, ChevronRight, Clock, CreditCard, Plus, Star, Users } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { clientRequirementsService, type ClientRequirementListItem, type ClientDashboardSummary, type RequirementStatus } from '../../../shared/services/client-requirements.service';
 import { useAuthStore } from '../../../shared/store/auth.store';
@@ -198,9 +198,6 @@ export default function HomeScreen() {
             <Text style={clientStyles.subtitle}>{dashboardLine}</Text>
           </View>
           <View style={styles.headerActions}>
-            <Pressable style={styles.iconButton} accessibilityLabel="Notifications">
-              <Bell size={18} color={C.body} />
-            </Pressable>
             <Pressable
               style={styles.avatarButton}
               accessibilityLabel="Profile"
@@ -570,16 +567,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     paddingTop: 2,
-  },
-  iconButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   avatarButton: {
     width: 38,

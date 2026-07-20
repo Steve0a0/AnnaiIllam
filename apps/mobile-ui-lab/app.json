@@ -3,7 +3,10 @@
     "name": "Annai Illam",
     "slug": "annai-illam",
     "version": "1.0.0",
-    "scheme": "annai-illam",
+    "scheme": [
+      "annai-illam",
+      "com.annaiillam"
+    ],
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -24,6 +27,8 @@
         "NSFaceIDUsageDescription": "Allow Annai Illam to use Face ID to secure your worker account.",
         "ITSAppUsesNonExemptEncryption": false,
         "CFBundleURLSchemes": [
+          "annai-illam",
+          "com.annaiillam",
           "com.googleusercontent.apps.255269959048-r6g317np9h2fvoro65qisq19jj4hv7ct"
         ]
       }
@@ -36,6 +41,9 @@
           "data": [
             {
               "scheme": "com.googleusercontent.apps.255269959048-ooojpl2ncdgm7afv96vkf4h3dbvcs3pd"
+            },
+            {
+              "scheme": "com.annaiillam"
             }
           ],
           "category": ["BROWSABLE", "DEFAULT"]
