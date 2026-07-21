@@ -223,9 +223,12 @@ export default function JobDetailScreen() {
               }
 
               const asset = photo.assets[0];
+              const selfieSize = asset.fileSize
+                ?? await workerOnboardingService.getLocalFileSize(asset.uri);
               const uploadInfo = await workerOnboardingService.getUploadUrl(
                 'selfie',
                 asset.mimeType ?? 'image/jpeg',
+                selfieSize,
               );
 
               if (uploadInfo.upload_url) {
@@ -233,8 +236,9 @@ export default function JobDetailScreen() {
                   uploadInfo.upload_url,
                   asset.uri,
                   asset.mimeType ?? 'image/jpeg',
+                  uploadInfo.upload_headers,
                 );
-                payload.selfie_url = uploadInfo.s3_key ?? asset.uri;
+                payload.selfie_url = uploadInfo.object_url ?? asset.uri;
               } else {
                 // Dev / local: no storage configured — pass local URI
                 payload.selfie_url = asset.uri;

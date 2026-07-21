@@ -76,14 +76,6 @@ export const clientPaymentsService = {
     return res.data.data;
   },
 
-  /** Fetch styled HTML invoice for a paid payment. GET /client/payments/{id}/invoice.html */
-  async fetchInvoiceHtml(paymentId: number): Promise<string> {
-    const res = await http.get<string>(`/client/payments/${paymentId}/invoice.html`, {
-      responseType: 'text',
-    });
-    return res.data;
-  },
-
   /** Create a Razorpay order. POST /client/payments/create-order */
   async createOrder(payload: CreateOrderPayload): Promise<CreateOrderResponse> {
     const res = await http.post<Envelope<CreateOrderResponse>>(

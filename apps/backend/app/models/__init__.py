@@ -9,7 +9,7 @@ from app.models.client_profile import ClientProfile
 from app.models.client_rating import ClientRating
 from app.models.complaint import Complaint
 from app.models.complaint_sla_policy import ComplaintSlaPolicy
-from app.models.invoice import Invoice
+from app.models.invoice import Invoice, InvoiceNumberSequence
 from app.models.otp_code import OtpCode
 from app.models.payroll_item import PayrollItem
 from app.models.payroll_run import PayrollRun
@@ -58,6 +58,7 @@ __all__ = [
     "Complaint",
     "ComplaintSlaPolicy",
     "Invoice",
+    "InvoiceNumberSequence",
     "Replacement",
     "ClientWorkerBlacklist",
     "WorkerDisbursement",

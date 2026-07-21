@@ -45,7 +45,7 @@ export type ComplaintsStackParamList = {
 export type ProfileStackParamList = {
   ClientProfile: undefined;
   BillingOverview: undefined;
-  InvoiceViewer: { paymentId: number; invoiceNumber: string };
+  InvoiceViewer: { invoiceId: number; invoiceNumber: string };
 };
 
 // Backward-compat alias

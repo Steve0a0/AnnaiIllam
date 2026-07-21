@@ -1,9 +1,11 @@
 ﻿from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+import httpx
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.roles import require_permission_group, require_role
 from app.api.dependencies.scoping import get_accessible_client_ids
-from app.core.payment_constants import ClientPaymentStatus, WorkerPayoutStatus
+from app.core.payment_constants import ClientPaymentStatus, PaymentPurpose, WorkerPayoutStatus
 from app.core.payroll_constants import PayrollItemPaymentStatus
 from app.core.roles import UserRole
 from app.db.deps import get_db
@@ -12,6 +14,8 @@ from app.repositories.payment_repository import (
     create_client_payment,
     create_worker_payout,
     get_client_payment_by_id,
+    get_client_payment_by_id_for_update,
+    get_client_refund_by_idempotency_key_for_update,
     get_client_payments_by_requirement_id,
     get_client_payments_paginated_stmt,
     get_worker_payout_by_id,
@@ -29,6 +33,7 @@ from app.repositories.requirement_repository import get_requirement_by_id
 from app.repositories.quote_repository import get_quote_by_requirement_id
 from app.models.client_payment import ClientPayment
 from app.schemas.payment import (
+    CreateGatewayRefundSchema,
     CreateWorkerPayoutSchema,
     MarkRunPaidSchema,
     RecordManualClientPaymentSchema,
@@ -38,14 +43,45 @@ from app.schemas.payment import (
 from app.services.payment_service import build_manual_client_payment, build_worker_payout
 from app.services.payment_ledger_service import (
     PaymentLedgerError,
+    validate_gateway_refund,
     validate_manual_payment,
 )
+from app.services.payment_refund_service import (
+    RefundReconciliationError,
+    reconcile_gateway_refund,
+)
+from app.services import razorpay_service
 from app.services.notification_service import enqueue_push_to_user
 from app.utils.audit import audit_event
 from app.utils.response import success_response
 from app.utils.time import utcnow
 
 router = APIRouter(prefix="/admin/finance", tags=["Admin Finance"])
+
+
+def _gateway_refund_response(payment: ClientPayment) -> dict:
+    return {
+        "refund_payment_id": payment.id,
+        "source_payment_id": payment.parent_payment_id,
+        "amount": payment.amount,
+        "status": payment.payment_status,
+        "gateway_refund_id": payment.gateway_refund_id,
+        "gateway_refund_status": payment.gateway_refund_status,
+        "idempotency_key": payment.refund_idempotency_key,
+    }
+
+
+def _ensure_matching_refund_retry(
+    payment: ClientPayment,
+    *,
+    source_payment_id: int,
+    amount: int,
+) -> None:
+    if payment.parent_payment_id != source_payment_id or payment.amount != amount:
+        raise HTTPException(
+            status_code=409,
+            detail="Idempotency key was already used for a different refund request",
+        )
 
 
 @router.post("/client-payments/manual")
@@ -66,6 +102,14 @@ def record_manual_client_payment(
     }
     if payload.payment_status not in allowed_statuses:
         raise HTTPException(status_code=400, detail="Invalid payment status")
+    if (
+        payload.purpose == PaymentPurpose.REFUND.value
+        and payload.payment_mode == "gateway"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Gateway refunds must use the Razorpay refund approval endpoint",
+        )
 
     quote = get_quote_by_requirement_id(db, requirement.id)
     payments = get_client_payments_by_requirement_id(db, requirement.id)
@@ -112,6 +156,176 @@ def record_manual_client_payment(
             "status": payment.payment_status,
             "purpose": payment.purpose,
         },
+    )
+
+
+@router.post("/client-payments/{payment_id}/refunds")
+def create_gateway_client_refund(
+    payment_id: int,
+    payload: CreateGatewayRefundSchema,
+    current_user: User = Depends(require_permission_group("finance_admin")),
+    db: Session = Depends(get_db),
+):
+    """Approve and execute an idempotent refund to the original payment source."""
+    refund_payment = get_client_refund_by_idempotency_key_for_update(
+        db,
+        payload.idempotency_key,
+    )
+    if refund_payment:
+        _ensure_matching_refund_retry(
+            refund_payment,
+            source_payment_id=payment_id,
+            amount=payload.amount,
+        )
+        if refund_payment.payment_status == ClientPaymentStatus.PAID.value:
+            return success_response(
+                "Refund already processed",
+                _gateway_refund_response(refund_payment),
+            )
+    else:
+        source_payment = get_client_payment_by_id_for_update(db, payment_id)
+        if not source_payment:
+            raise HTTPException(status_code=404, detail="Payment not found")
+
+        requirement = get_requirement_by_id(db, source_payment.requirement_id)
+        quote = get_quote_by_requirement_id(db, source_payment.requirement_id)
+        if not requirement:
+            raise HTTPException(status_code=404, detail="Requirement not found")
+        payments = get_client_payments_by_requirement_id(db, requirement.id)
+        try:
+            validate_gateway_refund(
+                requirement,
+                quote,
+                payments,
+                source_payment=source_payment,
+                amount=payload.amount,
+            )
+        except PaymentLedgerError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        refund_payment = ClientPayment(
+            client_id=source_payment.client_id,
+            requirement_id=source_payment.requirement_id,
+            amount=payload.amount,
+            purpose=PaymentPurpose.REFUND.value,
+            payment_model=source_payment.payment_model,
+            payment_mode="gateway",
+            payment_status=ClientPaymentStatus.PENDING.value,
+            parent_payment_id=source_payment.id,
+            refund_idempotency_key=payload.idempotency_key,
+            gateway_refund_status="pending",
+            reference_note=payload.reason,
+            recorded_by_user_id=current_user.id,
+        )
+        db.add(refund_payment)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            refund_payment = get_client_refund_by_idempotency_key_for_update(
+                db,
+                payload.idempotency_key,
+            )
+            if not refund_payment:
+                raise HTTPException(
+                    status_code=409,
+                    detail="A concurrent refund changed the refundable balance",
+                )
+            _ensure_matching_refund_retry(
+                refund_payment,
+                source_payment_id=payment_id,
+                amount=payload.amount,
+            )
+        else:
+            db.refresh(refund_payment)
+
+    source_payment = get_client_payment_by_id(db, payment_id)
+    if not source_payment or not source_payment.gateway_payment_id:
+        raise HTTPException(status_code=409, detail="Refund source payment is unavailable")
+
+    try:
+        gateway_refund = razorpay_service.create_refund(
+            source_payment.gateway_payment_id,
+            refund_payment.amount,
+            refund_payment.refund_idempotency_key,
+            receipt=f"refund-{refund_payment.id}",
+            notes={
+                "refund_payment_id": str(refund_payment.id),
+                "requirement_id": str(refund_payment.requirement_id),
+            },
+        )
+    except httpx.HTTPStatusError as exc:
+        refund_payment = get_client_refund_by_idempotency_key_for_update(
+            db,
+            payload.idempotency_key,
+        )
+        if refund_payment and refund_payment.payment_status != ClientPaymentStatus.PAID.value:
+            refund_payment.payment_status = ClientPaymentStatus.FAILED.value
+            refund_payment.gateway_refund_status = "request_failed"
+            db.commit()
+        audit_event(
+            "razorpay_refund_request_rejected",
+            {
+                "source_payment_id": payment_id,
+                "refund_payment_id": refund_payment.id if refund_payment else None,
+                "admin_user_id": current_user.id,
+                "http_status": exc.response.status_code,
+            },
+        )
+        raise HTTPException(status_code=502, detail="Razorpay rejected the refund request") from exc
+    except httpx.RequestError as exc:
+        audit_event(
+            "razorpay_refund_request_uncertain",
+            {
+                "source_payment_id": payment_id,
+                "refund_payment_id": refund_payment.id,
+                "admin_user_id": current_user.id,
+            },
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Refund status is uncertain; retry with the same idempotency key",
+        ) from exc
+
+    try:
+        result = reconcile_gateway_refund(
+            db,
+            gateway_refund,
+            refund_payment_id=refund_payment.id,
+        )
+    except RefundReconciliationError as exc:
+        db.rollback()
+        audit_event(
+            "razorpay_refund_not_reconciled",
+            {
+                "source_payment_id": payment_id,
+                "refund_payment_id": refund_payment.id,
+                "admin_user_id": current_user.id,
+                "reason": str(exc),
+            },
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Razorpay refund response could not be reconciled",
+        ) from exc
+
+    db.commit()
+    db.refresh(result.payment)
+    audit_event(
+        "razorpay_refund_reconciled",
+        {
+            "source_payment_id": payment_id,
+            "source_gateway_payment_id": source_payment.gateway_payment_id,
+            "refund_payment_id": result.payment.id,
+            "gateway_refund_id": result.payment.gateway_refund_id,
+            "gateway_refund_status": result.payment.gateway_refund_status,
+            "amount": result.payment.amount,
+            "admin_user_id": current_user.id,
+        },
+    )
+    return success_response(
+        "Refund request reconciled",
+        _gateway_refund_response(result.payment),
     )
 
 
@@ -183,6 +397,9 @@ def list_all_client_payments(
             "is_advance": is_advance,
             "gateway_order_id": p.gateway_order_id,
             "gateway_payment_id": p.gateway_payment_id,
+            "parent_payment_id": p.parent_payment_id,
+            "gateway_refund_id": p.gateway_refund_id,
+            "gateway_refund_status": p.gateway_refund_status,
             "reference_note": p.reference_note,
             "paid_at": p.paid_at.isoformat() if p.paid_at else None,
             "created_at": p.created_at.isoformat() if p.created_at else None,
@@ -214,6 +431,9 @@ def list_admin_client_payments_for_requirement(
             "payment_status": item.payment_status,
             "gateway_order_id": item.gateway_order_id,
             "gateway_payment_id": item.gateway_payment_id,
+            "parent_payment_id": item.parent_payment_id,
+            "gateway_refund_id": item.gateway_refund_id,
+            "gateway_refund_status": item.gateway_refund_status,
             "reference_note": item.reference_note,
             "paid_at": item.paid_at.isoformat() if item.paid_at else None,
         }
@@ -234,6 +454,14 @@ def update_client_payment_status(
     payment = get_client_payment_by_id(db, payment_id)
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
+    if (
+        payment.purpose == PaymentPurpose.REFUND.value
+        and payment.payment_mode == "gateway"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Gateway refund status is controlled by Razorpay reconciliation",
+        )
 
     old_status = payment.payment_status
     new_status = payload.payment_status
@@ -593,7 +821,7 @@ def _send_invoice_in_background(
     try:
         from app.models.client_profile import ClientProfile
         from app.models.requirement import Requirement
-        from app.services.email_service import send_payment_invoice
+        from app.services.email_service import send_payment_receipt
         from sqlalchemy import select as _sa_select
 
         # Resolve client profile and email
@@ -626,7 +854,7 @@ def _send_invoice_in_background(
         )
 
         background_tasks.add_task(
-            send_payment_invoice,
+            send_payment_receipt,
             to_email=to_email,
             client_name=client_name,
             payment_id=payment.id,

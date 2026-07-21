@@ -1,28 +1,21 @@
-"""
-Lightweight in-process scheduler.
+"""Periodic maintenance jobs for the standalone scheduler process.
 
-Runs periodic maintenance tasks in an asyncio background loop.
-No external dependencies — uses only asyncio + SQLAlchemy.
+The API never starts this loop. ``python -m app.scheduler_runner`` is the sole
+runtime entry point and production must deploy exactly one scheduler replica.
 
 Tasks registered here:
   - cleanup_expired_data  every 24 h  — purges expired OTPs and revoked tokens
 
-Failure visibility:
-  - Exceptions during cleanup are caught, logged, and exposed via get_scheduler_status().
-  - If the background task dies unexpectedly it is automatically restarted and a
-    CRITICAL log entry is emitted so alerts fire.
-  - GET /api/v1/ready reports a "scheduler" entry when the task is not alive.
-
-Note: This in-process scheduler is appropriate for single-process deployments.
-For multi-process or distributed deployments, migrate to Celery + Redis beat
-(see ROADMAP.md — post-MVP) to avoid duplicate runs and get distributed visibility.
+Exceptions are caught and logged before the loop retries at the next interval.
 """
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+import re
+from datetime import datetime, time, timedelta
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.assignment_constants import AssignmentStatus
@@ -42,18 +35,21 @@ from app.models.user import User
 from app.models.worker_profile import WorkerProfile
 from app.services.notification_service import send_push_to_user
 from app.utils.audit import audit_event
-from app.utils.time import utcnow, business_today
+from app.utils.time import IST, business_date, business_now, utcnow
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 # How often to run cleanup (seconds).  24 h default; override in tests.
 CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60
+NO_SHOW_ELIGIBLE_ASSIGNMENT_STATUSES = {
+    AssignmentStatus.ACCEPTED.value,
+    AssignmentStatus.ACTIVE.value,
+}
+_SHIFT_START_PATTERN = re.compile(r"(?<!\d)([01]?\d|2[0-3]):([0-5]\d)")
 
-# --- in-process scheduler state (readable via get_scheduler_status) -----------
 _last_run_at: datetime | None = None
 _last_error: str | None = None
-_cleanup_task: asyncio.Task | None = None
 
 
 def expire_stale_quotes(db: Session) -> dict:
@@ -68,7 +64,7 @@ def expire_stale_quotes(db: Session) -> dict:
     Takes a caller-supplied session so it can be called directly in tests.
     Returns {"expired_quotes": N}.
     """
-    today = business_today()
+    today = business_date()
     stale_quotes = db.execute(
         select(Quote)
         .where(Quote.status == QuoteStatus.SENT.value)
@@ -229,7 +225,7 @@ def check_unclosed_checkins(db: Session) -> dict:
     Returns {"unclosed_checkin_alerts": N}.
     """
     now = utcnow()
-    today = business_today()
+    today = business_date()
     cutoff = now - timedelta(hours=settings.max_shift_hours)
 
     candidates = db.execute(
@@ -295,7 +291,18 @@ def check_unclosed_checkins(db: Session) -> dict:
     return {"unclosed_checkin_alerts": alert_count}
 
 
-def flag_no_shows(db: Session) -> dict:
+def _parse_shift_start(*shift_descriptions: str | None) -> time | None:
+    """Extract the first 24-hour ``HH:MM`` value from assignment/requirement text."""
+    for description in shift_descriptions:
+        if not description:
+            continue
+        match = _SHIFT_START_PATTERN.search(description)
+        if match:
+            return time(hour=int(match.group(1)), minute=int(match.group(2)))
+    return None
+
+
+def flag_no_shows(db: Session, *, now: datetime | None = None) -> dict:
     """Create attendance records for workers who did not check in today.
 
     Scans all accepted/active assignments on in_progress requirements whose
@@ -305,7 +312,12 @@ def flag_no_shows(db: Session) -> dict:
     Takes a caller-supplied session so it can be called directly in tests.
     Returns {"flagged_no_shows": N}.
     """
-    today = business_today()
+    current_time = now or business_now()
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=IST)
+    else:
+        current_time = current_time.astimezone(IST)
+    today = business_date(current_time)
 
     # Load accepted/active assignments on in_progress requirements that include today.
     # End-date check is done in Python to stay DB-agnostic (no date arithmetic SQL).
@@ -314,10 +326,7 @@ def flag_no_shows(db: Session) -> dict:
         .join(Requirement, Assignment.requirement_id == Requirement.id)
         .join(WorkerProfile, Assignment.worker_profile_id == WorkerProfile.id)
         .where(
-            Assignment.status.in_([
-                AssignmentStatus.ACCEPTED.value,
-                AssignmentStatus.ACTIVE.value,
-            ]),
+            Assignment.status.in_(NO_SHOW_ELIGIBLE_ASSIGNMENT_STATUSES),
             Requirement.status == RequirementStatus.IN_PROGRESS.value,
             Requirement.start_date <= today,
         )
@@ -334,9 +343,32 @@ def flag_no_shows(db: Session) -> dict:
 
     flagged_count = 0
     for assignment, requirement, worker_profile in candidates:
-        # Python-side end-date filter
-        req_end_date = requirement.start_date + timedelta(days=requirement.duration_days - 1)
-        if today > req_end_date:
+        # Respect assignment-specific dates when present, otherwise use the
+        # requirement window. Cancelled/replaced assignments never enter the
+        # eligible-status query above.
+        assignment_start = assignment.start_date or requirement.start_date
+        requirement_end = requirement.start_date + timedelta(
+            days=requirement.duration_days - 1
+        )
+        assignment_end = assignment.end_date or requirement_end
+        if today < assignment_start or today > assignment_end:
+            continue
+
+        shift_start = _parse_shift_start(
+            assignment.assigned_shift,
+            requirement.shift_details,
+        )
+        if shift_start is None:
+            logger.warning(
+                "Skipping no-show evaluation for assignment %d: no parseable shift start",
+                assignment.id,
+            )
+            continue
+
+        eligible_at = datetime.combine(today, shift_start, tzinfo=IST) + timedelta(
+            minutes=settings.no_show_grace_period_minutes
+        )
+        if current_time < eligible_at:
             continue
 
         # Skip if an attendance record already exists for today (check-in or prior no_show)
@@ -357,8 +389,19 @@ def flag_no_shows(db: Session) -> dict:
             status=AttendanceStatus.NO_SHOW.value,
             notes="Auto-flagged: no check-in recorded",
         )
-        db.add(no_show)
-        db.flush()
+        try:
+            # The savepoint lets a concurrent/repeated run lose the unique-key
+            # race without rolling back other scheduler work in this session.
+            with db.begin_nested():
+                db.add(no_show)
+                db.flush()
+        except IntegrityError:
+            logger.info(
+                "No-show already exists for assignment %d on %s",
+                assignment.id,
+                today,
+            )
+            continue
 
         audit_event(
             "worker_no_show_flagged",
@@ -453,38 +496,6 @@ async def _cleanup_loop() -> None:
         await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
 
 
-def _on_task_done(task: asyncio.Task) -> None:
-    """Called when the cleanup task finishes for any reason.
-
-    Normal shutdown (cancelled via stop_scheduler) is ignored.
-    Any unexpected exit triggers a CRITICAL log and an automatic restart so
-    background tasks never fail silently.
-    """
-    if task.cancelled():
-        return  # normal shutdown — do nothing
-
-    exc = task.exception()
-    if exc is not None:
-        logger.critical(
-            "Scheduler task died with an unhandled exception — restarting: %s",
-            exc,
-            exc_info=exc,
-        )
-    else:
-        logger.critical(
-            "Scheduler task exited unexpectedly without an exception — restarting"
-        )
-
-    # Auto-restart so cleanup keeps running even after an unexpected crash.
-    _spawn_task()
-
-
-def _spawn_task() -> None:
-    global _cleanup_task
-    _cleanup_task = asyncio.ensure_future(_cleanup_loop())
-    _cleanup_task.add_done_callback(_on_task_done)
-
-
 async def run_scheduler_forever() -> None:
     """Entry point for the dedicated standalone scheduler process.
 
@@ -493,32 +504,3 @@ async def run_scheduler_forever() -> None:
     Blocks until cancelled (e.g. SIGTERM on `docker stop`).
     """
     await _cleanup_loop()
-
-
-def start_scheduler() -> None:
-    """Spawn the background cleanup loop.  Call once from the lifespan startup."""
-    _spawn_task()
-    logger.info("Scheduler started (cleanup interval: %ds)", CLEANUP_INTERVAL_SECONDS)
-
-
-def stop_scheduler() -> None:
-    """Cancel the background loop.  Call from the lifespan shutdown."""
-    global _cleanup_task
-    if _cleanup_task and not _cleanup_task.done():
-        _cleanup_task.cancel()
-
-
-def get_scheduler_status() -> dict:
-    """Return a snapshot of scheduler health for the /ready endpoint.
-
-    Returns:
-        alive: True if the background task is currently running.
-        last_run_at: ISO timestamp of the last successful cleanup run, or None.
-        last_error: String message from the most recent cleanup failure, or None.
-    """
-    alive = _cleanup_task is not None and not _cleanup_task.done()
-    return {
-        "alive": alive,
-        "last_run_at": _last_run_at.isoformat() if _last_run_at else None,
-        "last_error": _last_error,
-    }

@@ -51,3 +51,6 @@ Thumbs.db
 postgres-data/
 redis-data/
 minio-data/
+
+# Runtime uploads (local-development fallback; production uses S3/R2)
+/apps/backend/uploads/

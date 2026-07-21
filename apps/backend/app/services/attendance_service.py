@@ -2,6 +2,7 @@
 
 from app.core.attendance_constants import AttendanceStatus
 from app.models.attendance import Attendance
+from app.utils.time import business_date
 
 
 def build_checkin_attendance(
@@ -19,7 +20,7 @@ def build_checkin_attendance(
     return Attendance(
         assignment_id=assignment_id,
         worker_profile_id=worker_profile_id,
-        attendance_date=now.date(),
+        attendance_date=business_date(now),
         status=AttendanceStatus.PRESENT.value,
         check_in_time=now,
         check_in_latitude=latitude,

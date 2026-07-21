@@ -13,7 +13,7 @@ import { WebView } from 'react-native-webview';
 import { ChevronLeft } from 'lucide-react-native';
 import type { ProfileStackParamList } from '../navigation/types';
 import { C } from './clientStyles';
-import { clientPaymentsService } from '../../../shared/services/client-payments.service';
+import { clientInvoicesService } from '../../../shared/services/client-invoices.service';
 
 type Navigation = NativeStackNavigationProp<ProfileStackParamList>;
 type Route = RouteProp<ProfileStackParamList, 'InvoiceViewer'>;
@@ -31,14 +31,14 @@ export default function InvoiceViewerScreen() {
     setLoading(true);
     setError(false);
     try {
-      const content = await clientPaymentsService.fetchInvoiceHtml(params.paymentId);
+      const content = await clientInvoicesService.fetchDocumentHtml(params.invoiceId);
       setHtml(content);
     } catch {
       setError(true);
     } finally {
       setLoading(false);
     }
-  }, [params.paymentId]);
+  }, [params.invoiceId]);
 
   useEffect(() => { load(); }, [load]);
 

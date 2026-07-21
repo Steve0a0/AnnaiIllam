@@ -19,6 +19,7 @@ Environment variables required (staging/production):
 import hashlib
 import hmac
 import logging
+from urllib.parse import quote
 
 import httpx
 
@@ -60,6 +61,51 @@ def create_order(amount_rupees: int, receipt: str, notes: dict | None = None) ->
     order = response.json()
     logger.info("Razorpay order created | order_id=%s receipt=%s", order.get("id"), receipt)
     return order
+
+
+def fetch_payment(razorpay_payment_id: str) -> dict:
+    """Fetch authoritative payment facts used by the checkout callback."""
+    payment_id = quote(razorpay_payment_id, safe="")
+    response = httpx.get(
+        f"{_RAZORPAY_API_BASE}/payments/{payment_id}",
+        auth=(settings.razorpay_key_id, settings.razorpay_key_secret),
+        timeout=_REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def create_refund(
+    razorpay_payment_id: str,
+    amount_rupees: int,
+    idempotency_key: str,
+    *,
+    receipt: str,
+    notes: dict | None = None,
+) -> dict:
+    """Create an idempotent normal refund for a captured Razorpay payment."""
+    payment_id = quote(razorpay_payment_id, safe="")
+    response = httpx.post(
+        f"{_RAZORPAY_API_BASE}/payments/{payment_id}/refund",
+        auth=(settings.razorpay_key_id, settings.razorpay_key_secret),
+        headers={"X-Refund-Idempotency": idempotency_key},
+        json={
+            "amount": amount_rupees * 100,
+            "speed": "normal",
+            "receipt": receipt,
+            "notes": notes or {},
+        },
+        timeout=_REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    refund = response.json()
+    logger.info(
+        "Razorpay refund requested | refund_id=%s payment_id=%s status=%s",
+        refund.get("id"),
+        razorpay_payment_id,
+        refund.get("status"),
+    )
+    return refund
 
 
 def verify_payment_signature(

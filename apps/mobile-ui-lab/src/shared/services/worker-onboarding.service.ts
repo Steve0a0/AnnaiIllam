@@ -11,6 +11,9 @@ export type OnboardingStatus = {
 export type UploadUrlResult = {
   upload_url: string | null;
   s3_key: string | null;
+  object_url?: string | null;
+  upload_headers?: Record<string, string>;
+  max_size_bytes?: number;
   expires_in_seconds?: number;
   dev_mode: boolean;
 };
@@ -40,20 +43,33 @@ export const workerOnboardingService = {
   getUploadUrl: async (
     document_type: 'govt_id' | 'selfie',
     content_type: string,
+    file_size: number,
   ): Promise<UploadUrlResult> => {
     const res = await http.post<Envelope<UploadUrlResult>>('/worker/onboarding/upload-url', {
       document_type,
       content_type,
+      file_size,
     });
     return res.data.data;
   },
 
-  uploadToStorage: async (presignedUrl: string, uri: string, contentType: string) => {
+  getLocalFileSize: async (uri: string): Promise<number> => {
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    return blob.size;
+  },
+
+  uploadToStorage: async (
+    presignedUrl: string,
+    uri: string,
+    contentType: string,
+    requiredHeaders: Record<string, string> = {},
+  ) => {
     const response = await fetch(uri);
     const blob = await response.blob();
     const uploadResponse = await fetch(presignedUrl, {
       method: 'PUT',
-      headers: { 'Content-Type': contentType },
+      headers: { ...requiredHeaders, 'Content-Type': contentType },
       body: blob,
     });
     if (!uploadResponse.ok) {

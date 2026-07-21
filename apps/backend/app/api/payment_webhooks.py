@@ -13,6 +13,17 @@ from app.repositories.payment_repository import get_client_payment_by_gateway_or
 from app.schemas.payment import PaymentWebhookSchema
 from app.services import razorpay_service
 from app.services.payment_service import mark_gateway_payment_success
+from app.services.payment_reconciliation_service import (
+    GatewayPaymentConflictError,
+    InvalidCapturedPaymentError,
+    PaymentOrderNotFoundError,
+    reconcile_captured_gateway_payment,
+)
+from app.services.payment_refund_service import (
+    RefundIntentNotFoundError,
+    RefundReconciliationError,
+    reconcile_gateway_refund,
+)
 from app.services.webhook_security import verify_webhook_signature
 from app.utils.audit import audit_event
 from app.utils.response import success_response
@@ -26,6 +37,12 @@ async def payment_webhook(
     request: Request,
     db: Session = Depends(get_db),
 ):
+    # Legacy synthetic payload retained only for local regression tests. Real
+    # environments must use /webhook/razorpay so captured status, amount, and
+    # currency come from Razorpay's signed payment entity.
+    if settings.app_env != "local":
+        raise HTTPException(status_code=404, detail="Not found")
+
     client_host = request.client.host if request.client else "unknown"
     check_rate_limit(f"payment_webhook_ip:{client_host}", limit=60, window_seconds=60)
 
@@ -138,6 +155,75 @@ async def razorpay_webhook(
         raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
 
     event_type = event_data.get("event")
+    if event_type in {"refund.created", "refund.processed", "refund.failed"}:
+        try:
+            refund_entity = event_data["payload"]["refund"]["entity"]
+            razorpay_refund_id = refund_entity["id"]
+        except (KeyError, TypeError) as exc:
+            security_logger.error("Malformed Razorpay refund webhook payload: %s", exc)
+            raise HTTPException(status_code=400, detail="Malformed refund webhook payload") from exc
+
+        check_rate_limit(
+            f"razorpay_webhook_refund:{razorpay_refund_id}",
+            limit=20,
+            window_seconds=300,
+        )
+        try:
+            result = reconcile_gateway_refund(db, refund_entity)
+        except RefundIntentNotFoundError as exc:
+            db.rollback()
+            security_logger.error(
+                "Razorpay refund intent not found | refund_id=%s event=%s",
+                razorpay_refund_id,
+                event_type,
+            )
+            audit_event(
+                "razorpay_refund_intent_not_found",
+                {"gateway_refund_id": razorpay_refund_id, "event": event_type},
+            )
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RefundReconciliationError as exc:
+            db.rollback()
+            security_logger.error(
+                "Razorpay refund not reconciled | refund_id=%s event=%s reason=%s",
+                razorpay_refund_id,
+                event_type,
+                exc,
+            )
+            audit_event(
+                "razorpay_refund_webhook_not_reconciled",
+                {
+                    "gateway_refund_id": razorpay_refund_id,
+                    "event": event_type,
+                    "reason": str(exc),
+                },
+            )
+            return success_response(
+                "Refund webhook acknowledged without changing the ledger",
+                {},
+            )
+
+        db.commit()
+        audit_event(
+            "razorpay_refund_webhook_reconciled",
+            {
+                "event_id": request.headers.get("x-razorpay-event-id"),
+                "event": event_type,
+                "refund_payment_id": result.payment.id,
+                "gateway_refund_id": razorpay_refund_id,
+                "gateway_refund_status": result.payment.gateway_refund_status,
+                "changed": result.changed,
+            },
+        )
+        return success_response(
+            "Refund webhook reconciled",
+            {
+                "refund_payment_id": result.payment.id,
+                "status": result.payment.payment_status,
+                "gateway_refund_status": result.payment.gateway_refund_status,
+            },
+        )
+
     if event_type != "payment.captured":
         # Acknowledge unknown events without processing — prevents Razorpay retries.
         return success_response(f"Event '{event_type}' acknowledged but not processed", {})
@@ -166,17 +252,67 @@ async def razorpay_webhook(
         )
         return success_response("Payment already recorded", {"payment_id": payment.id})
 
-    mark_gateway_payment_success(
-        payment=payment,
-        gateway_payment_id=razorpay_payment_id,
-        gateway_signature=signature,
-    )
+    try:
+        result = reconcile_captured_gateway_payment(
+            db,
+            gateway_order_id=razorpay_order_id,
+            gateway_payment_id=razorpay_payment_id,
+            amount_paise=payment_entity.get("amount"),
+            currency=payment_entity.get("currency"),
+            status=payment_entity.get("status"),
+            captured=payment_entity.get("captured"),
+        )
+    except PaymentOrderNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (InvalidCapturedPaymentError, GatewayPaymentConflictError) as exc:
+        db.rollback()
+        event_id = request.headers.get("x-razorpay-event-id")
+        security_logger.error(
+            "Razorpay capture not reconciled | event_id=%s order_id=%s payment_id=%s reason=%s",
+            event_id,
+            razorpay_order_id,
+            razorpay_payment_id,
+            exc,
+        )
+        audit_event(
+            "razorpay_payment_capture_not_reconciled",
+            {
+                "event_id": event_id,
+                "razorpay_order_id": razorpay_order_id,
+                "razorpay_payment_id": razorpay_payment_id,
+                "reason": str(exc),
+            },
+        )
+        return success_response(
+            "Webhook acknowledged without changing the ledger",
+            {"payment_id": payment.id, "status": payment.payment_status},
+        )
+
     db.commit()
+
+    if not result.changed:
+        audit_event(
+            "razorpay_webhook_duplicate_ignored",
+            {
+                "event_id": request.headers.get("x-razorpay-event-id"),
+                "payment_id": result.payment.id,
+                "razorpay_order_id": razorpay_order_id,
+                "razorpay_payment_id": razorpay_payment_id,
+            },
+        )
+        return success_response(
+            "Payment already recorded",
+            {
+                "payment_id": result.payment.id,
+                "status": result.payment.payment_status,
+            },
+        )
 
     audit_event(
         "razorpay_payment_captured",
         {
-            "payment_id": payment.id,
+            "event_id": request.headers.get("x-razorpay-event-id"),
+            "payment_id": result.payment.id,
             "razorpay_order_id": razorpay_order_id,
             "razorpay_payment_id": razorpay_payment_id,
             "amount": payment.amount,
@@ -185,5 +321,8 @@ async def razorpay_webhook(
 
     return success_response(
         "Payment captured successfully",
-        {"payment_id": payment.id, "status": payment.payment_status},
+        {
+            "payment_id": result.payment.id,
+            "status": result.payment.payment_status,
+        },
     )

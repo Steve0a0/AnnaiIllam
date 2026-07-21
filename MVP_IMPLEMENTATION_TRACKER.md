@@ -21,7 +21,7 @@ The production audit completed on 2026-07-20 supersedes older readiness claims w
 |---|---|
 | Current phase | `Production Hardening — Gate 0 complete` |
 | Current priority | Close audited P0 security, payment, scheduler, build, mobile-release, and compliance blockers |
-| Next work | Obtain Product/Finance sign-off for `PROD-004`, then execute `PROD-005` and `PROD-006` |
+| Next work | Complete the interactive Razorpay sandbox capture/webhook proof, then obtain Product/Finance sign-off for `PROD-004` |
 | Release branch | `production-hardening` |
 | Feature freeze | Active; no unrelated product features on the release branch |
 | Last updated | 2026-07-21 |
@@ -32,10 +32,14 @@ The production audit completed on 2026-07-20 supersedes older readiness claims w
 |---|---|---|---|---|
 | P0 | DONE | PROD-001: Create production hardening release baseline | All/Docs | Branch, freeze, role owners, approval matrix, verified failing gates, audit corrections, and PROD-001–046 register documented |
 | P0 | DONE | PROD-003: Remove unauthenticated user-directory disclosure | Backend | `GET /api/v1/users` is super-admin-only, paginated, excludes phone/email/name, and has router-wide authentication regression coverage; 29 targeted tests pass |
-| P0 | NEEDS_REVIEW | PROD-002: Establish mandatory release gates | All/CI | Workflows and local gates are green, including zero Python audit findings and 782 backend tests; push, rerun GitHub Actions, then activate the documented ruleset |
+| P0 | NEEDS_REVIEW | PROD-002: Establish mandatory release gates | All/CI | Workflows and local gates are green, including zero Python audit findings and 809 backend tests; push, rerun GitHub Actions, then activate the documented ruleset |
 | P0 | NEEDS_REVIEW | PROD-004: Define authoritative payment ledger and invariants | Backend/Product/Finance | Central ledger service, integer-rupee contract, explicit purposes, server-derived client charges, refund/overpayment rules, and lifecycle decision implemented; Product/Finance sign-off pending |
-| P0 | TODO | PROD-005–006: Harden gateway calculation and transaction processing | Backend/Finance | Verify gateway boundaries, then make verification/webhooks transactional |
-| P0 | TODO | PROD-009–011: Repair scheduler, no-show timing, and timezones | Backend/DevOps | Separate singleton scheduler and use India business dates |
+| P0 | DONE | PROD-005: Verify gateway amount calculation | Backend/Finance | Adapter alone converts authoritative rupees to paise; a real ₹1 test-mode order returned 100 paise in INR |
+| P0 | NEEDS_REVIEW | PROD-006: Make payment verification and webhooks transactional | Backend/Finance | Row-locked capture reconciliation and duplicate/race tests pass; interactive Checkout and public staging webhook proof remain |
+| P0 | NEEDS_REVIEW | ANNAI-7: Execute refunds through Razorpay | Backend/Finance | Implementation and 809 backend tests pass; complete one captured test-mode refund and retain Dashboard/webhook evidence |
+| P0 | DONE | PROD-009: Move scheduler out of API workers | Backend/DevOps | API startup has no scheduler hooks; Compose/systemd run one standalone scheduler process; five regression tests pass |
+| P0 | DONE | PROD-010: Correct no-show timing and rerun safety | Backend/Product | Shift start plus configurable grace, terminal-state exclusion, race-safe inserts, DB uniqueness repair, and 15 focused tests complete |
+| P0 | DONE | PROD-011: Verify timezone-aware business dates | Backend | One `business_date()` helper drives attendance, no-show, quote-expiry, and related date decisions; UTC-boundary tests and 796 backend tests pass |
 | P0 | TODO | PROD-008: Restore backend lint gate | Backend | Fix remaining Ruff violations and runtime defects |
 | P0 | DONE | PROD-019: Restore admin production build | Admin | ESLint has 0 errors, tests pass 25/25, and the Next.js production build completes |
 | P0 | DONE | PROD-020: Restore mobile type safety | Mobile | TypeScript passes with 0 errors and mobile tests pass 11/11 |
@@ -45,7 +49,7 @@ The production audit completed on 2026-07-20 supersedes older readiness claims w
 | Historical item | Current status | Reason | Replacement ticket |
 |---|---|---|---|
 | GitHub Actions release gates | NEEDS_REVIEW | Admin, mobile, backend Ruff/tests, and Python dependency audit pass locally; a GitHub rerun must confirm repository/container scans before ruleset enforcement | PROD-002, PROD-008 |
-| Feature 4: No-Show / Absent Worker Handling | NEEDS_REVIEW | Scheduler can run in every API worker and can evaluate before shift/grace time | PROD-009, PROD-010 |
+| Feature 4: No-Show / Absent Worker Handling | DONE | One standalone scheduler owns the job; shift/grace timing and database idempotency are covered by regression tests | PROD-009, PROD-010 |
 | HARD-1: Environment & Secrets Audit | NEEDS_REVIEW | Production secrets management and Docker build-context exclusion are missing | PROD-031, PROD-033 |
 | HARD-2: CORS & Security Headers | NEEDS_REVIEW | API headers exist; admin headers and browser session hardening remain open | PROD-016, PROD-017 |
 | HARD-3: Database Security & Indexes | NEEDS_REVIEW | Historical 763/763 is not a current release result; constraints and retention remain open | PROD-012, PROD-039 |
@@ -228,6 +232,19 @@ All data endpoints confirmed within target via FastAPI middleware `duration_ms` 
 - **Gap: No complaints screens for client or worker in mobile.** No complaint raise, no complaint status tracking on mobile.
 - **State**: Zustand for auth. No other global state.
 - **Icons**: lucide-react-native. **UI**: Tamagui (worker), React Native core styles (client).
+
+## ANNAI-8 GST Tax Invoice Hardening (2026-07-21)
+
+- Backend drafts now snapshot supplier, recipient, SAC, place of supply, and the intrastate CGST/SGST or interstate IGST calculation from server-owned configuration; the client cannot choose the rate or tax amounts.
+- Issuance allocates a consecutive financial-year number under a database row lock, stores the rendered HTML plus SHA-256, and makes the issued row immutable in SQLAlchemy and PostgreSQL.
+- Admin, client/mobile, and email use the same stored issued document. Payment confirmations are explicitly labelled receipts and are not represented as tax invoices.
+- Production status is **NEEDS_REVIEW**: Finance/CA must approve both samples in `docs/GST_INVOICE_CA_REVIEW.md`, approve supplier/SAC/rate/place-of-supply configuration, and decide whether IRN/QR e-invoice integration applies.
+
+## ANNAI-10 Social Authentication Hardening (2026-07-21)
+
+- Google and Apple authentication are disabled by default through explicit provider flags.
+- Enabling Google without at least one registered client audience, or Apple without its bundle ID, prevents backend startup in every environment.
+- Runtime verification fails before network/JWT processing when a provider is disabled or its audience is absent; Google and Apple tokens for other applications are rejected.
 
 ## How To Update This Tracker
 

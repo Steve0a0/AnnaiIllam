@@ -33,7 +33,7 @@ from app.services.notification_service import enqueue_push_to_user, queue_notifi
 from app.services.payment_ledger_service import build_payment_ledger
 from app.services.requirement_service import build_requirement_entity
 from app.utils.audit import audit_event
-from app.utils.time import business_today
+from app.utils.time import business_date
 from app.utils.response import success_response
 
 router = APIRouter(prefix="/client/requirements", tags=["Client Requirements"])
@@ -387,7 +387,7 @@ def decide_quote(
 
     # Inline expiry: only the approve action is blocked when the quote has passed valid_until.
     # The reject action is still allowed so the client can signal they don't want the expired quote.
-    if payload.action == "approve" and quote.valid_until is not None and business_today() > quote.valid_until:
+    if payload.action == "approve" and quote.valid_until is not None and business_date() > quote.valid_until:
         quote.status = QuoteStatus.EXPIRED.value
         quote.updated_by_user_id = current_user.id
         try:

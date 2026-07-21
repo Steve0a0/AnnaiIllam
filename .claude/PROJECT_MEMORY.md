@@ -58,7 +58,8 @@
 - Worker app has biometric (Face ID/Touch ID) per-session auth via `expo-local-authentication`.
 - Worker onboarding is multi-stage: phone OTP → consent → ID/selfie S3 upload → build profile → under review (admin approves) → biometric setup → app.
 - Worker HomeScreen is the core operational screen: hero job card (accept/decline, GPS check-in/out), week strip calendar, availability toggle, browse jobs button.
-- GPS check-in/out uses `expo-location`. File uploads use presigned S3 URLs with local multipart fallback.
+- GPS check-in/out uses `expo-location`. File uploads use presigned S3/R2 URLs with local multipart fallback; onboarding/E2E tests redirect fallback files to pytest `tmp_path`, and `apps/backend/uploads/` is ignored.
+- Local KYC fallback paths are restricted to generated worker-document keys and checked with `realpath` against the upload root before filesystem access; traversal coverage is in `tests/test_worker_onboarding.py`.
 - **Known gap: No complaints screens exist in mobile for either client or worker.** FIXED 2026-05-08 — see below.
 
 ## Mobile Complaints / Issues (built 2026-05-08)
@@ -177,17 +178,35 @@ Four core-flow bugs fixed as part of a structured audit. 111 backend tests pass 
 - Payment purposes are advance, balance, adjustment, and refund.
 - Product and Finance approval of `docs/PAYMENT_LEDGER.md` is still required before PROD-004 can be DONE.
 
+## ANNAI-7 Razorpay Refunds (2026-07-21)
+
+- Gateway refunds are positive client-payment ledger rows with purpose refund,
+  a source parent_payment_id, a unique Razorpay refund ID, and a unique
+  idempotency key.
+- Finance-admin approval persists a pending refund reservation before calling
+  Razorpay; signed refund webhooks finalize pending/processed/failed state.
+- Manual payment/status routes cannot create or confirm gateway refund rows.
+- Full PostgreSQL/Redis backend suite passes 809/809; captured test-mode refund
+  evidence is still required.
+
 ## PROD-019 / PROD-020 Release Gates (2026-07-21)
 
 - Admin ESLint passes with 0 errors; 8 warnings remain non-blocking.
 - Admin tests pass 25/25 and the Next.js production build completes.
 - Mobile TypeScript passes and mobile tests pass 11/11.
-- Backend dependency audit passes with no known vulnerabilities after upgrading the coupled FastAPI/Starlette and pytest/pytest-asyncio dependency sets; the full backend suite passes 782/782 tests.
+- Backend dependency audit passes with no known vulnerabilities after upgrading the coupled FastAPI/Starlette and pytest/pytest-asyncio dependency sets; the full backend suite passes 809/809 tests.
 - FastAPI 0.139 uses lazy included routers. Router-wide security tests must inspect each included router's `effective_route_contexts()` as well as direct `APIRoute` entries.
+- Scheduled jobs run only through `python -m app.scheduler_runner`; API startup has no scheduler hooks. Deploy exactly one scheduler replica independently of API `WEB_CONCURRENCY`.
+- No-show flagging parses the first `HH:MM` from assignment/requirement shift text, waits `NO_SHOW_GRACE_PERIOD_MINUTES` (default 60), and fails safe when no start time is parseable. Attendance is unique by assignment and business date; migration `b7e1c42d9a60` repairs drifted databases.
+- `app.utils.time.business_date(at=None)` is the single Asia/Kolkata calendar-date helper. Naive inputs are treated as stored UTC; attendance check-ins retain UTC timestamps but derive `attendance_date` in IST, which payroll aggregates.
+- Razorpay mobile callbacks and `payment.captured` webhooks reconcile through `payment_reconciliation_service.py` under row locks. Captured status, INR, exact paise amount, order ID, and globally unique payment ID are enforced; the synthetic webhook is local-only.
 - Admin build fixes include a stable React Query timestamp for requirement age,
   local `useQueryClient()` initialization in `WorkerReviewPanel`, and
   `worker_daily_rate` in `CreateQuotePayload`.
 - Mobile `clientStyles.C` now defines the semantic `neutralBg` token.
+- GST tax invoices are separate from payment receipts. `gst_invoice_service.py` owns validated supplier/client snapshots, SAC and place-of-supply tax splitting, financial-year numbering, immutable HTML/hash creation, and shared document responses.
+- Issued invoice HTML is stored once and reused by admin, client/mobile, and email. Migration `e8f91b24c6a0` adds the snapshot, sequence table, and PostgreSQL immutability trigger; CA sample approval and e-invoice applicability remain release gates in `docs/GST_INVOICE_CA_REVIEW.md`.
+- Social login is opt-in with `GOOGLE_AUTH_ENABLED` / `APPLE_AUTH_ENABLED`. Enabled Google requires at least one configured web/iOS/Android audience; enabled Apple requires `APPLE_APP_BUNDLE_ID`. Verification rejects disabled/misconfigured providers before external calls and always validates audience.
 - **Fix 10 — Worker phone update had no uniqueness check** (`admin_people.py:755-759`): Added `get_user_by_phone` lookup before setting new phone; raises HTTP 409 if another account already uses it. Phone is `.strip()`-normalised before comparison. Tests: `TestWorkerPhoneUniqueness` in `tests/test_people.py` (4 tests).
 
 ## Admin Clients Page (implemented 2026-05-08)

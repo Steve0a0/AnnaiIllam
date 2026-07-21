@@ -37,8 +37,31 @@ quote and current ledger. They never use those client hints to set a charge.
 
 New overpayments are rejected. Existing overpaid legacy data remains visible as
 **overpaid_amount** for Finance to reconcile. Gateway order/payment IDs are
-unique, verification callbacks are idempotent, and a matching pending intent is
-reused. Concurrent transaction locking is separately tracked by PROD-006.
+unique, and a matching pending intent is reused. Mobile callbacks and Razorpay
+webhooks converge on one row-locked reconciliation service that validates the
+captured status, exact paise amount, and INR currency before marking paid.
+
+## Razorpay refunds
+
+- A finance-admin approves a source refund with
+  **POST /api/v1/admin/finance/client-payments/{payment_id}/refunds**.
+- The request contains an integer whole-rupee amount, a stable idempotency key,
+  and an approval reason.
+- The backend creates a pending refund ledger row before the external call.
+  Pending rows reserve refundable balance, so concurrent approvals cannot
+  over-refund the requirement or captured source payment.
+- The Razorpay adapter alone converts the amount to paise and sends
+  **X-Refund-Idempotency**. A retry with the same key returns/reconciles the
+  same refund rather than creating another one.
+- A Razorpay processed result confirms the positive-value refund ledger row.
+  Pending stays reserved until a signed refund.processed or refund.failed
+  webhook supplies the final state.
+- Gateway refund rows cannot be created or confirmed through the manual-payment
+  endpoints. Non-gateway refunds remain available for authorised offline
+  reconciliation.
+- A dispute credit note documents an approved client credit but is not itself a
+  transfer. Finance must select the captured source payment and execute the
+  refund through the endpoint above.
 
 ## Lifecycle decision
 
