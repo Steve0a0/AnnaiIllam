@@ -172,9 +172,11 @@ Verification:
 - `git diff --check` passes.
 - The first `production-hardening` GitHub Actions run registered all required check names. Both CodeQL jobs passed; dependency review correctly skipped because the event was a branch push rather than a pull request.
 - The first run exposed a Redis health-command quoting defect and high/critical npm advisories. The follow-up fixes the Redis option, updates the admin/mobile lockfiles, pins patched Next.js, and overrides the vulnerable transitive mobile `ws` release.
-- The exact admin and mobile production audit commands now exit successfully with no high or critical advisories. A GitHub rerun is required to verify the pushed result.
+- The exact admin and mobile production audit commands now exit successfully with no high or critical advisories.
+- Backend vulnerable pins were upgraded as a compatible FastAPI/Starlette and pytest/pytest-asyncio set. `python -m pip_audit -r requirements.txt` reports no known vulnerabilities.
 - Docker 29.6.1 is available, but local image builds were not run because PROD-031 has not yet excluded local environment files from Docker build contexts.
-- Admin lint/build and mobile TypeScript are now green locally. Backend Ruff remains assigned to PROD-008; security workflow findings still require the GitHub failing-step logs.
+- Admin lint/build, mobile TypeScript, backend Ruff, and the full backend suite are green locally. The backend suite passes 782/782 tests against PostgreSQL and Redis after the dependency upgrades.
+- A GitHub rerun is still required to verify the pushed results and identify any remaining container or repository scan findings.
 
 ## PROD-019 and PROD-020 Verification Evidence — 2026-07-21
 

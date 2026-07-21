@@ -182,6 +182,8 @@ Four core-flow bugs fixed as part of a structured audit. 111 backend tests pass 
 - Admin ESLint passes with 0 errors; 8 warnings remain non-blocking.
 - Admin tests pass 25/25 and the Next.js production build completes.
 - Mobile TypeScript passes and mobile tests pass 11/11.
+- Backend dependency audit passes with no known vulnerabilities after upgrading the coupled FastAPI/Starlette and pytest/pytest-asyncio dependency sets; the full backend suite passes 782/782 tests.
+- FastAPI 0.139 uses lazy included routers. Router-wide security tests must inspect each included router's `effective_route_contexts()` as well as direct `APIRoute` entries.
 - Admin build fixes include a stable React Query timestamp for requirement age,
   local `useQueryClient()` initialization in `WorkerReviewPanel`, and
   `worker_daily_rate` in `CreateQuotePayload`.
