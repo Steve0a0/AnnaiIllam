@@ -319,8 +319,8 @@ def view_client_payment_invoice(
     current_user: User = Depends(require_role(UserRole.CLIENT.value)),
     db: Session = Depends(get_db),
 ):
-    """Return a styled HTML invoice for a confirmed payment (for in-app WebView)."""
-    from app.services.email_service import _build_invoice_html, _format_date
+    """Return a styled receipt for a confirmed payment (legacy route)."""
+    from app.services.email_service import _build_payment_receipt_html, _format_date
 
     client_profile = get_client_profile_by_user_id(db, current_user.id)
     if not client_profile:
@@ -331,7 +331,7 @@ def view_client_payment_invoice(
         raise HTTPException(status_code=404, detail="Payment not found")
 
     if payment.payment_status != "paid":
-        raise HTTPException(status_code=404, detail="Invoice only available for confirmed payments")
+        raise HTTPException(status_code=404, detail="Receipt only available for confirmed payments")
 
     requirement = get_requirement_by_id(db, payment.requirement_id)
     if not requirement:
@@ -351,8 +351,8 @@ def view_client_payment_invoice(
         requirement.start_date.isoformat() if requirement.start_date else ""
     )
 
-    html = _build_invoice_html(
-        invoice_number=f"INV-{payment.id:05d}",
+    html = _build_payment_receipt_html(
+        invoice_number=f"RCT-{payment.id:05d}",
         payment_date=payment_date,
         client_name=client_name,
         requirement_category=requirement.category or "Service",
@@ -623,12 +623,12 @@ def verify_razorpay_payment(
 
     # Send invoice email in background
     try:
-        from app.services.email_service import send_payment_invoice
+        from app.services.email_service import send_payment_receipt
         to_email = client_profile.email or current_user.email
         if to_email and requirement:
             client_name = client_profile.company_name or client_profile.contact_name or "Valued Client"
             background_tasks.add_task(
-                send_payment_invoice,
+                send_payment_receipt,
                 to_email=to_email,
                 client_name=client_name,
                 payment_id=payment.id,

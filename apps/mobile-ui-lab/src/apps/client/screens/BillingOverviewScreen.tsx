@@ -6,7 +6,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ChevronLeft, ReceiptText } from 'lucide-react-native';
 import type { ProfileStackParamList } from '../navigation/types';
 import { C } from './clientStyles';
-import { clientPaymentsService, type ClientPaymentSummary } from '../../../shared/services/client-payments.service';
+import { clientInvoicesService, type ClientInvoiceSummary } from '../../../shared/services/client-invoices.service';
 
 type Navigation = NativeStackNavigationProp<ProfileStackParamList>;
 
@@ -14,23 +14,17 @@ function fmtDate(iso: string) {
   return new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(iso));
 }
 
-function invoiceNumber(id: number) {
-  return `INV-${String(id).padStart(5, '0')}`;
-}
-
 export default function BillingOverviewScreen() {
   const navigation = useNavigation<Navigation>();
   const insets = useSafeAreaInsets();
-  const [payments, setPayments] = useState<ClientPaymentSummary[]>([]);
+  const [invoices, setInvoices] = useState<ClientInvoiceSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     try {
-      const data = await clientPaymentsService.listAll();
-      // Only show paid payments — these are the ones an invoice was sent for
-      setPayments(data.filter(p => p.payment_status === 'paid'));
+      setInvoices(await clientInvoicesService.listAll());
     } catch {
       // silently fail — empty state shown
     } finally {
@@ -49,7 +43,7 @@ export default function BillingOverviewScreen() {
           <Text style={s.backText}>Back</Text>
         </Pressable>
         <Text style={s.title}>My Invoices</Text>
-        <Text style={s.subtitle}>Invoices emailed to you after each confirmed payment</Text>
+        <Text style={s.subtitle}>Issued GST tax invoices</Text>
       </View>
 
       {loading ? (
@@ -59,31 +53,31 @@ export default function BillingOverviewScreen() {
           contentContainerStyle={s.list}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={C.brand} />}
         >
-          {payments.length === 0 ? (
+          {invoices.length === 0 ? (
             <View style={s.empty}>
               <ReceiptText size={44} color={C.muted} />
               <Text style={s.emptyTitle}>No invoices yet</Text>
-              <Text style={s.emptyBody}>Invoices appear here once a payment is confirmed</Text>
+              <Text style={s.emptyBody}>Invoices appear here after Finance issues them</Text>
             </View>
           ) : (
-            payments.map((p) => (
+            invoices.map((invoice) => (
               <Pressable
-                key={p.id}
+                key={invoice.id}
                 style={s.card}
                 onPress={() => navigation.navigate('InvoiceViewer', {
-                  paymentId: p.id,
-                  invoiceNumber: invoiceNumber(p.id),
+                  invoiceId: invoice.id,
+                  invoiceNumber: invoice.invoice_number,
                 })}
               >
                 <View style={s.cardIcon}>
                   <ReceiptText size={20} color={C.brand} />
                 </View>
                 <View style={s.cardBody}>
-                  <Text style={s.invoiceNum}>{invoiceNumber(p.id)}</Text>
-                  <Text style={s.jobName}>{p.job_name ?? `Requirement #${p.requirement_id}`}</Text>
-                  {p.location ? <Text style={s.meta}>{p.location}</Text> : null}
+                  <Text style={s.invoiceNum}>{invoice.invoice_number}</Text>
+                  <Text style={s.jobName}>Requirement #{invoice.requirement_id}</Text>
+                  <Text style={s.meta}>Total: Rs. {invoice.total_amount.toLocaleString('en-IN')}</Text>
                   <Text style={s.meta}>
-                    {p.paid_at ? `Sent on ${fmtDate(p.paid_at)}` : 'Confirmed'}
+                    Issued on {fmtDate(invoice.invoice_date)}
                   </Text>
                 </View>
                 <View style={s.sentBadge}>
@@ -150,13 +144,3 @@ const s = StyleSheet.create({
   },
   sentText: { color: C.successText, fontSize: 12, fontWeight: '600' },
 });
-
-type PaymentStatus = ClientPaymentSummary['payment_status'];
-
-const STATUS_META: Record<PaymentStatus, { label: string; bg: string; color: string }> = {
-  paid:                 { label: 'Paid',                bg: C.successBg,  color: C.successText  },
-  pending:              { label: 'Pending',             bg: C.infoBg,     color: C.infoText     },
-  pending_verification: { label: 'Verifying',           bg: C.warningBg,  color: C.warningText  },
-  failed:               { label: 'Failed',              bg: C.dangerBg,   color: C.dangerText   },
-  refunded:             { label: 'Refunded',            bg: C.neutralBg,   color: C.muted        },
-};

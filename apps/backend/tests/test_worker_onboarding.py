@@ -29,11 +29,16 @@ Edge-cases and guards:
 
 import pytest
 
+from app.core.file_upload_constants import SELFIE_MAX_SIZE_BYTES
 from app.models.worker_document import WorkerDocument
 from app.models.worker_profile import WorkerProfile
 from app.services.token_service import build_token_pair
 
 BASE = "/api/v1"
+
+# A minimal but genuinely valid JPEG (magic bytes 0xFFD8FF …) so uploads pass
+# the magic-byte + size checks the way a real photo would.
+_JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9"
 
 # ---------------------------------------------------------------------------
 # Minimal valid profile payload
@@ -93,14 +98,36 @@ def client_headers(db, client_user):
     return {"Authorization": f"Bearer {access_token}"}
 
 
+@pytest.fixture(autouse=True)
+def _local_storage_mode(monkeypatch):
+    """Force local-filesystem storage (no S3) so onboarding tests are
+    deterministic regardless of the developer's .env — this matches CI, which
+    configures no S3. is_s3_configured() reads settings.s3_bucket."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "s3_bucket", "")
+
+
 # ---------------------------------------------------------------------------
 # Helper — advance a worker user to identity_uploaded via the API
 # ---------------------------------------------------------------------------
 
+def _upload_local(test_client, headers, document_type, content=_JPEG, content_type="image/jpeg"):
+    """Upload a real document via the local-upload endpoint; returns the response."""
+    return test_client.post(
+        f"{BASE}/worker/onboarding/local-upload",
+        params={"document_type": document_type},
+        files={"file": (f"{document_type}.jpg", content, content_type)},
+        headers=headers,
+    )
+
+
 def _submit_identity(test_client, headers):
+    """Upload real govt_id + selfie, then submit their validated keys."""
+    govt_key = _upload_local(test_client, headers, "govt_id").json()["data"]["local_key"]
+    selfie_key = _upload_local(test_client, headers, "selfie").json()["data"]["local_key"]
     return test_client.post(
         f"{BASE}/worker/onboarding/identity",
-        json={"govt_id_key": "local:/tmp/id.jpg", "selfie_key": "local:/tmp/selfie.jpg"},
+        json={"govt_id_key": govt_key, "selfie_key": selfie_key},
         headers=headers,
     )
 
@@ -160,6 +187,7 @@ class TestUploadUrl:
         r = client.post(f"{BASE}/worker/onboarding/upload-url", json={
             "document_type": "govt_id",
             "content_type": "application/exe",
+            "file_size": 1024,
         }, headers=worker_headers)
         assert r.status_code == 422
 
@@ -167,6 +195,7 @@ class TestUploadUrl:
         r = client.post(f"{BASE}/worker/onboarding/upload-url", json={
             "document_type": "passport",  # not in allowed set
             "content_type": "image/jpeg",
+            "file_size": 1024,
         }, headers=worker_headers)
         assert r.status_code == 422
 
@@ -179,6 +208,7 @@ class TestUploadUrl:
         r = client.post(f"{BASE}/worker/onboarding/upload-url", json={
             "document_type": "govt_id",
             "content_type": "image/jpeg",
+            "file_size": 1024,
         }, headers=worker_headers)
         assert r.status_code == 200
         data = r.json()["data"]
@@ -189,6 +219,7 @@ class TestUploadUrl:
         r = client.post(f"{BASE}/worker/onboarding/upload-url", json={
             "document_type": "selfie",
             "content_type": "image/png",
+            "file_size": 1024,
         }, headers=worker_headers)
         assert r.status_code == 200
 
@@ -246,6 +277,49 @@ class TestSubmitIdentity:
             WorkerDocument.user_id == worker_user.id
         ).all()
         assert all(d.verification_status == "pending" for d in docs)
+
+
+# ---------------------------------------------------------------------------
+# ANNAI-9 — KYC upload validation: bad objects rejected before activation
+# ---------------------------------------------------------------------------
+
+class TestIdentityUploadValidation:
+    def test_oversized_document_rejected(self, client, worker_headers):
+        oversized = _JPEG + b"\x00" * (SELFIE_MAX_SIZE_BYTES + 1)
+        r = _upload_local(client, worker_headers, "selfie", content=oversized)
+        assert r.status_code == 422
+
+    def test_content_not_matching_type_rejected(self, client, worker_headers):
+        # Declares JPEG but the bytes are not any supported image/pdf format.
+        r = _upload_local(
+            client, worker_headers, "govt_id",
+            content=b"this is plain text, not an image",
+            content_type="image/jpeg",
+        )
+        assert r.status_code == 422
+
+    def test_cross_user_key_rejected(self, client, worker_headers):
+        # A well-formed key owned by a DIFFERENT user must not be accepted.
+        other_key = "local:worker-documents/999999/{}/{}.jpg"
+        r = client.post(
+            f"{BASE}/worker/onboarding/identity",
+            json={
+                "govt_id_key": other_key.format("govt_id", "a" * 32),
+                "selfie_key": other_key.format("selfie", "b" * 32),
+            },
+            headers=worker_headers,
+        )
+        assert r.status_code == 422
+
+    def test_nonexistent_object_rejected(self, client, worker_headers, worker_user):
+        # Correct owner + prefix, but no file was ever uploaded.
+        key = f"local:worker-documents/{worker_user.id}/govt_id/{'a' * 32}.jpg"
+        r = client.post(
+            f"{BASE}/worker/onboarding/identity",
+            json={"govt_id_key": key, "selfie_key": key},
+            headers=worker_headers,
+        )
+        assert r.status_code == 422
 
 
 # ---------------------------------------------------------------------------

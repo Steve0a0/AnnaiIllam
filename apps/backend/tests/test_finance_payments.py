@@ -11,12 +11,17 @@ import hashlib
 import hmac
 import json
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
 from app.core.assignment_constants import AssignmentStatus
-from app.core.payment_constants import ClientPaymentStatus, PaymentModel, WorkerPayoutStatus
+from app.core.payment_constants import (
+    ClientPaymentStatus,
+    PaymentModel,
+    PaymentPurpose,
+    WorkerPayoutStatus,
+)
 from app.core.payroll_constants import PayrollItemPaymentStatus
 from app.core.statuses import RequirementStatus
 from app.models.assignment import Assignment
@@ -28,6 +33,7 @@ from app.models.quote import Quote
 from app.models.requirement import Requirement
 from app.models.worker_payout import WorkerPayout
 from app.models.worker_profile import WorkerProfile
+from app.services.payment_ledger_service import build_payment_ledger
 from app.services.token_service import build_token_pair
 
 BASE = "/api/v1"
@@ -295,6 +301,46 @@ def _post_razorpay_capture(
     )
 
 
+def _post_razorpay_refund_event(
+    client,
+    refund_payment: ClientPayment,
+    source_payment: ClientPayment,
+    *,
+    gateway_refund_id: str,
+    gateway_status: str,
+    event: str,
+    secret: str,
+    event_id: str,
+):
+    body = json.dumps(
+        {
+            "event": event,
+            "payload": {
+                "refund": {
+                    "entity": {
+                        "id": gateway_refund_id,
+                        "payment_id": source_payment.gateway_payment_id,
+                        "amount": refund_payment.amount * 100,
+                        "currency": "INR",
+                        "status": gateway_status,
+                        "notes": {"refund_payment_id": str(refund_payment.id)},
+                    }
+                }
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+    return client.post(
+        f"{BASE}/payments/webhook/razorpay",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Razorpay-Signature": _make_webhook_sig(body, secret),
+            "X-Razorpay-Event-Id": event_id,
+        },
+    )
+
+
 class TestRazorpayOrderCreation:
     def test_client_creates_payment_order_successfully(
         self, client, client_headers, client_profile, approved_requirement
@@ -479,6 +525,40 @@ class TestRazorpayOrderCreation:
 # ──────────────────────────────────────────────────────────────────
 # Payment Webhook
 # ──────────────────────────────────────────────────────────────────
+
+
+class TestRazorpayRefundAdapter:
+    def test_refund_uses_paise_and_idempotency_header(self):
+        from app.services import razorpay_service
+
+        response = Mock()
+        response.json.return_value = {
+            "id": "rfnd_adapter_test",
+            "payment_id": "pay_adapter_test",
+            "amount": 12500,
+            "currency": "INR",
+            "status": "processed",
+        }
+        with patch(
+            "app.services.razorpay_service.httpx.post",
+            return_value=response,
+        ) as post:
+            result = razorpay_service.create_refund(
+                "pay_adapter_test",
+                125,
+                "refund-adapter-key",
+                receipt="refund-125",
+                notes={"refund_payment_id": "125"},
+            )
+
+        response.raise_for_status.assert_called_once_with()
+        assert result["id"] == "rfnd_adapter_test"
+        _, kwargs = post.call_args
+        assert kwargs["headers"] == {
+            "X-Refund-Idempotency": "refund-adapter-key"
+        }
+        assert kwargs["json"]["amount"] == 12500
+        assert kwargs["json"]["speed"] == "normal"
 
 
 class TestPaymentWebhook:
@@ -907,6 +987,21 @@ class TestManualPaymentRecording:
         )
         assert response.status_code == 403
 
+    def test_gateway_refund_cannot_bypass_razorpay_endpoint(
+        self, client, admin_headers, approved_requirement
+    ):
+        response = client.post(
+            f"{BASE}/admin/finance/client-payments/manual",
+            json=self._payload(
+                approved_requirement.id,
+                purpose=PaymentPurpose.REFUND.value,
+                payment_mode="gateway",
+            ),
+            headers=admin_headers,
+        )
+        assert response.status_code == 400
+        assert "razorpay refund" in response.json()["message"].lower()
+
     def test_worker_cannot_record_manual_payment(
         self, client, worker_headers, approved_requirement
     ):
@@ -995,6 +1090,189 @@ class TestManualPaymentRecording:
 # ──────────────────────────────────────────────────────────────────
 # Client Payment Status Update
 # ──────────────────────────────────────────────────────────────────
+
+
+class TestGatewayRefunds:
+    WEBHOOK_SECRET = "test-razorpay-refund-webhook-secret"
+
+    @staticmethod
+    def _payload(**overrides) -> dict:
+        payload = {
+            "amount": 2000,
+            "idempotency_key": "refund-request-0001",
+            "reason": "Approved partial cancellation refund",
+        }
+        payload.update(overrides)
+        return payload
+
+    @staticmethod
+    def _gateway_refund(source_payment: ClientPayment, **overrides) -> dict:
+        refund = {
+            "id": "rfnd_test_0001",
+            "payment_id": source_payment.gateway_payment_id,
+            "amount": 200000,
+            "currency": "INR",
+            "status": "processed",
+        }
+        refund.update(overrides)
+        return refund
+
+    def test_admin_refund_executes_once_and_reconciles_ledger(
+        self,
+        client,
+        db,
+        admin_headers,
+        paid_gateway_payment,
+        approved_requirement,
+    ):
+        gateway_refund = self._gateway_refund(paid_gateway_payment)
+        with patch(
+            "app.api.admin_finance.razorpay_service.create_refund",
+            return_value=gateway_refund,
+        ) as create_refund:
+            first = client.post(
+                f"{BASE}/admin/finance/client-payments/{paid_gateway_payment.id}/refunds",
+                json=self._payload(),
+                headers=admin_headers,
+            )
+            second = client.post(
+                f"{BASE}/admin/finance/client-payments/{paid_gateway_payment.id}/refunds",
+                json=self._payload(),
+                headers=admin_headers,
+            )
+
+        assert first.status_code == 200, first.json()
+        assert second.status_code == 200, second.json()
+        assert "already processed" in second.json()["message"].lower()
+        refund_payment_id = first.json()["data"]["refund_payment_id"]
+        create_refund.assert_called_once_with(
+            paid_gateway_payment.gateway_payment_id,
+            2000,
+            "refund-request-0001",
+            receipt=f"refund-{refund_payment_id}",
+            notes={
+                "refund_payment_id": str(refund_payment_id),
+                "requirement_id": str(approved_requirement.id),
+            },
+        )
+
+        refunds = (
+            db.query(ClientPayment)
+            .filter(
+                ClientPayment.parent_payment_id == paid_gateway_payment.id,
+                ClientPayment.purpose == PaymentPurpose.REFUND.value,
+            )
+            .all()
+        )
+        assert len(refunds) == 1
+        assert refunds[0].payment_status == ClientPaymentStatus.PAID.value
+        assert refunds[0].gateway_refund_id == "rfnd_test_0001"
+
+        quote = db.query(Quote).filter_by(requirement_id=approved_requirement.id).one()
+        payments = (
+            db.query(ClientPayment)
+            .filter_by(requirement_id=approved_requirement.id)
+            .all()
+        )
+        ledger = build_payment_ledger(quote, payments)
+        assert ledger.gross_paid == 5000
+        assert ledger.refunded_amount == 2000
+        assert ledger.total_paid == 3000
+        assert ledger.outstanding_balance == 27000
+
+    def test_refund_cannot_exceed_source_refundable_balance(
+        self,
+        client,
+        admin_headers,
+        paid_gateway_payment,
+    ):
+        with patch("app.api.admin_finance.razorpay_service.create_refund") as create_refund:
+            response = client.post(
+                f"{BASE}/admin/finance/client-payments/{paid_gateway_payment.id}/refunds",
+                json=self._payload(amount=5001),
+                headers=admin_headers,
+            )
+
+        assert response.status_code == 400
+        assert "cannot exceed" in response.json()["message"].lower()
+        create_refund.assert_not_called()
+
+    def test_non_finance_role_cannot_execute_refund(
+        self,
+        client,
+        client_headers,
+        paid_gateway_payment,
+    ):
+        response = client.post(
+            f"{BASE}/admin/finance/client-payments/{paid_gateway_payment.id}/refunds",
+            json=self._payload(),
+            headers=client_headers,
+        )
+        assert response.status_code == 403
+
+    def test_pending_refund_is_finalized_by_signed_webhook(
+        self,
+        client,
+        db,
+        admin_headers,
+        paid_gateway_payment,
+        monkeypatch,
+    ):
+        from app.core import config as config_module
+
+        monkeypatch.setattr(
+            config_module.settings,
+            "payment_webhook_secret",
+            self.WEBHOOK_SECRET,
+        )
+        pending_gateway_refund = self._gateway_refund(
+            paid_gateway_payment,
+            id="rfnd_test_pending",
+            status="pending",
+        )
+        with patch(
+            "app.api.admin_finance.razorpay_service.create_refund",
+            return_value=pending_gateway_refund,
+        ):
+            response = client.post(
+                f"{BASE}/admin/finance/client-payments/{paid_gateway_payment.id}/refunds",
+                json=self._payload(idempotency_key="refund-request-pending"),
+                headers=admin_headers,
+            )
+        assert response.status_code == 200, response.json()
+
+        refund_payment = db.get(
+            ClientPayment,
+            response.json()["data"]["refund_payment_id"],
+        )
+        assert refund_payment.payment_status == ClientPaymentStatus.PENDING.value
+
+        webhook = _post_razorpay_refund_event(
+            client,
+            refund_payment,
+            paid_gateway_payment,
+            gateway_refund_id="rfnd_test_pending",
+            gateway_status="processed",
+            event="refund.processed",
+            secret=self.WEBHOOK_SECRET,
+            event_id="evt_refund_processed",
+        )
+        duplicate = _post_razorpay_refund_event(
+            client,
+            refund_payment,
+            paid_gateway_payment,
+            gateway_refund_id="rfnd_test_pending",
+            gateway_status="processed",
+            event="refund.processed",
+            secret=self.WEBHOOK_SECRET,
+            event_id="evt_refund_processed_duplicate",
+        )
+
+        assert webhook.status_code == 200, webhook.json()
+        assert duplicate.status_code == 200, duplicate.json()
+        db.refresh(refund_payment)
+        assert refund_payment.payment_status == ClientPaymentStatus.PAID.value
+        assert refund_payment.gateway_refund_status == "processed"
 
 
 class TestClientPaymentStatusUpdate:

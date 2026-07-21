@@ -92,13 +92,13 @@ Names can replace these role owners when the delivery team is confirmed. Until t
 | PROD-004 | P0 Critical | NEEDS_REVIEW | Backend Engineer / Product / Finance | Ledger implementation and tests complete; required Product/Finance sign-off remains pending |
 | PROD-005 | P0 Critical | DONE | Backend Engineer | Authoritative rupees convert to paise only in the Razorpay adapter; real test-mode order verified |
 | PROD-006 | P0 Critical | NEEDS_REVIEW | Backend Engineer | Row-locked callback/webhook reconciliation and race tests pass; interactive sandbox capture remains |
-| PROD-007 | P0 | TODO | Backend / Admin / Mobile / Finance | Separate payment receipts from GST invoices |
+| PROD-007 | P0 | NEEDS_REVIEW | Backend / Admin / Mobile / Finance | Payment confirmations are receipts; issued GST invoices use their own immutable API/document. Finance acceptance required. |
 | PROD-008 | P0 | TODO | Backend Engineer | Fix backend runtime and lint failures |
 | PROD-009 | P0 High | DONE | Backend / DevOps | API workers contain no scheduler startup; one standalone scheduler replica owns all jobs |
 | PROD-010 | P0 High | DONE | Backend Engineer / Product | No-shows require shift start plus configurable grace and are DB-idempotent |
 | PROD-011 | P0 | DONE | Backend Engineer | One IST business-date helper owns attendance, no-show, quote-expiry, and related calendar decisions |
 | PROD-012 | P1 | TODO | Backend / Database | Harden database constraints and lifecycle retention |
-| PROD-013 | P1 High | TODO | Backend / Mobile | Enforce social-login audiences |
+| PROD-013 | P1 High | DONE | Backend / Mobile | Google and Apple are explicitly opt-in, enabled providers require startup audiences, and cross-app tokens are rejected. |
 | PROD-014 | P1 High | TODO | Backend / DevOps | Make critical rate limits fail safely |
 | PROD-015 | P1 High | TODO | Backend / Mobile / DevOps | Secure document and selfie uploads |
 | PROD-016 | P1 High | TODO | Backend / Admin | Harden admin session storage |
@@ -111,7 +111,7 @@ Names can replace these role owners when the delivery team is confirmed. Until t
 | PROD-023 | P1 | TODO | Mobile Engineer | Complete mobile permission configuration |
 | PROD-024 | P1 | TODO | Admin / Mobile / QA | Remediate accessibility defects |
 | PROD-025 | P0 | TODO | Product / Indian Legal Counsel | Decide business and worker legal classification |
-| PROD-026 | P0 | TODO | Backend / Admin / Finance / CA | Implement GST-compliant invoices and credit notes |
+| PROD-026 | P0 | NEEDS_REVIEW | Backend / Admin / Finance / CA | GST invoice snapshot, FY sequence, tax split, immutability, and shared document implemented. CA samples, e-invoice decision, and credit-note scope remain. |
 | PROD-027 | P0 | TODO | Product / Backend / Admin / Mobile / Legal | Implement cancellation, refund, and dispute policy |
 | PROD-028 | P0 | TODO | Legal / Product / Admin / Mobile | Publish privacy, terms, and grievance surfaces |
 | PROD-029 | P0 | TODO | Backend / Admin / Mobile / Privacy Counsel | Implement DPDP consent and data-rights workflow |
@@ -256,6 +256,28 @@ Verification:
 - Remaining external gate: complete interactive test Checkout, captured payment,
   mobile callback, and public staging webhook delivery/replay. Until retained
   evidence exists, PROD-006 remains `NEEDS_REVIEW`.
+
+## ANNAI-7 Refund Execution Evidence — 2026-07-21
+
+Implemented:
+
+- Finance-admin-only refund approval targets an existing paid Razorpay payment.
+- A pending, linked refund ledger row is committed before the external request
+  and reserves both requirement-wide and source-payment refundable balance.
+- Razorpay receives the whole-rupee amount converted to paise at the adapter
+  boundary plus a durable X-Refund-Idempotency key.
+- Processed API responses and signed refund.processed/refund.failed webhooks
+  converge on one refund reconciliation service.
+- Manual finance routes cannot create or confirm gateway refund rows.
+- Duplicate approval clicks with the same key execute one gateway refund.
+
+Verification:
+
+- Payment ledger, finance, and dashboard suite: 80/80 passed.
+- Full PostgreSQL/Redis backend suite: 809/809 passed.
+- Backend Ruff: passed.
+- A real sandbox refund still requires a captured test payment; the existing
+  test order has not been paid and cannot be refunded.
 
 ## PROD-019 and PROD-020 Verification Evidence — 2026-07-21
 

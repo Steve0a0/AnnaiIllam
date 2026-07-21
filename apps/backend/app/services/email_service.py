@@ -1,11 +1,11 @@
 """Email service — Resend integration.
 
 Usage:
-    from app.services.email_service import send_payment_invoice
+    from app.services.email_service import send_payment_receipt
 
     # Fire-and-forget inside a BackgroundTask:
     background_tasks.add_task(
-        send_payment_invoice,
+        send_payment_receipt,
         payment_id=payment.id,
         ...
     )
@@ -19,16 +19,16 @@ Environment variables (add to .env):
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Invoice HTML template
+# Payment receipt HTML template
 # ---------------------------------------------------------------------------
 
-def _build_invoice_html(
+def _build_payment_receipt_html(
     *,
     invoice_number: str,
     payment_date: str,
@@ -67,7 +67,7 @@ def _build_invoice_html(
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Payment Invoice — {invoice_number}</title>
+  <title>Payment Receipt — {invoice_number}</title>
 </head>
 <body style="margin:0;padding:0;background:#F5F5F4;font-family:Arial,Helvetica,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F5F4;padding:32px 0;">
@@ -90,7 +90,7 @@ def _build_invoice_html(
                   </p>
                 </td>
                 <td align="right">
-                  <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.55);">INVOICE</p>
+                  <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.55);">PAYMENT RECEIPT</p>
                   <p style="margin:4px 0 0;font-size:20px;font-weight:700;color:#25A263;">
                     {invoice_number}
                   </p>
@@ -107,7 +107,7 @@ def _build_invoice_html(
             <!-- Greeting -->
             <p style="margin:0 0 24px;font-size:15px;color:#44403C;line-height:1.6;">
               Dear <strong>{client_name}</strong>,<br/>
-              Thank you for your payment. Please find your invoice details below.
+              Thank you for your payment. Please find your receipt details below.
             </p>
 
             <!-- Payment summary card -->
@@ -166,7 +166,7 @@ def _build_invoice_html(
 
             <!-- Footer note -->
             <p style="margin:0;font-size:13px;color:#78716C;line-height:1.7;">
-              This is a computer-generated invoice and does not require a signature.
+              This payment receipt is not a GST tax invoice.
               For any questions please contact us at
               <a href="mailto:support@annaiillam.com"
                  style="color:#1A6640;text-decoration:none;">support@annaiillam.com</a>.
@@ -179,7 +179,7 @@ def _build_invoice_html(
         <tr>
           <td style="background:#F5F5F4;padding:16px 40px;border-top:1px solid #E7E5E4;">
             <p style="margin:0;font-size:11px;color:#A8A29E;text-align:center;">
-              © {datetime.utcnow().year} Annai Illam · Staffing &amp; Manpower Solutions
+              © {datetime.now(UTC).year} Annai Illam · Staffing &amp; Manpower Solutions
             </p>
           </td>
         </tr>
@@ -206,7 +206,7 @@ TD_VALUE = (
 # Public send function
 # ---------------------------------------------------------------------------
 
-def send_payment_invoice(
+def send_payment_receipt(
     *,
     to_email: str,
     client_name: str,
@@ -223,7 +223,7 @@ def send_payment_invoice(
     start_date: str,
     duration_days: int,
 ) -> None:
-    """Send a payment confirmation + invoice email.
+    """Send a payment confirmation receipt (not a GST tax invoice).
 
     Uses Gmail SMTP if GMAIL_USER + GMAIL_APP_PASSWORD are set.
     Falls back to Resend if RESEND_API_KEY is set.
@@ -231,12 +231,12 @@ def send_payment_invoice(
     """
     from app.core.config import settings  # lazy import to avoid circular
 
-    invoice_number = f"INV-{payment_id:05d}"
+    invoice_number = f"RCT-{payment_id:05d}"
     payment_date_str = payment_date.strftime("%d %b %Y")
     start_date_str = _format_date(start_date)
     subject = f"Payment Confirmed — {invoice_number} | Annai Illam"
 
-    html = _build_invoice_html(
+    html = _build_payment_receipt_html(
         invoice_number=invoice_number,
         payment_date=payment_date_str,
         client_name=client_name,
@@ -258,8 +258,23 @@ def send_payment_invoice(
         _send_via_resend(settings, to_email, subject, html, payment_id)
     else:
         logger.info(
-            "No email provider configured — skipping invoice email for payment #%s", payment_id
+            "No email provider configured — skipping payment receipt for payment #%s", payment_id
         )
+
+
+def send_tax_invoice(
+    *, to_email: str, client_name: str, invoice_id: int, invoice_number: str, html: str
+) -> None:
+    """Email the exact immutable HTML stored on the issued tax invoice."""
+    from app.core.config import settings
+
+    subject = f"Tax Invoice {invoice_number} | Annai Illam"
+    if settings.gmail_user and settings.gmail_app_password:
+        _send_via_gmail(settings, to_email, subject, html, invoice_id)
+    elif settings.resend_api_key:
+        _send_via_resend(settings, to_email, subject, html, invoice_id)
+    else:
+        logger.info("No email provider configured - skipping tax invoice #%s", invoice_id)
 
 
 def _send_via_gmail(

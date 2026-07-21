@@ -12,6 +12,11 @@ class ClientPayment(Base):
     __table_args__ = (
         UniqueConstraint("gateway_order_id", name="uq_client_payments_gateway_order_id"),
         UniqueConstraint("gateway_payment_id", name="uq_client_payments_gateway_payment_id"),
+        UniqueConstraint("gateway_refund_id", name="uq_client_payments_gateway_refund_id"),
+        UniqueConstraint(
+            "refund_idempotency_key",
+            name="uq_client_payments_refund_idempotency_key",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
@@ -34,6 +39,21 @@ class ClientPayment(Base):
     gateway_order_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     gateway_payment_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     gateway_signature: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Gateway refund rows are positive-value ledger entries with purpose=refund.
+    # They reference the captured payment but never reuse its unique payment ID.
+    parent_payment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("client_payments.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    gateway_refund_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    refund_idempotency_key: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+    gateway_refund_status: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
 
     reference_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     recorded_by_user_id: Mapped[int | None] = mapped_column(

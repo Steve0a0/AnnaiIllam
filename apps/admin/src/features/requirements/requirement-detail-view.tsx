@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ClipboardCheck,
   CreditCard,
+  Download,
   FileText,
   MapPin,
   MoreHorizontal,
@@ -1202,6 +1203,7 @@ function InvoicesSection({ requirementId }: { requirementId: number }) {
 
   const [generating, setGenerating] = useState(false);
   const [issuing, setIssuing] = useState<number | null>(null);
+  const [downloading, setDownloading] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const invoices = data?.data ?? [];
@@ -1230,6 +1232,24 @@ function InvoicesSection({ requirementId }: { requirementId: number }) {
       setActionError(getErrorMessage(err));
     } finally {
       setIssuing(null);
+    }
+  };
+
+  const handleDownload = async (invoiceId: number, invoiceNumber: string) => {
+    setDownloading(invoiceId);
+    setActionError(null);
+    try {
+      const documentBlob = await invoicesService.getDocument(invoiceId);
+      const url = URL.createObjectURL(documentBlob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${invoiceNumber.replaceAll("/", "-")}.html`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setActionError(getErrorMessage(err));
+    } finally {
+      setDownloading(null);
     }
   };
 
@@ -1329,9 +1349,15 @@ function InvoicesSection({ requirementId }: { requirementId: number }) {
                       </Button>
                     )}
                     {inv.status === "issued" && (
-                      <span className="text-xs font-medium text-[#1D4ED8]">
-                        Issued {inv.issued_at ? formatDate(inv.issued_at.slice(0, 10)) : ""}
-                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={downloading === inv.id}
+                        onClick={() => handleDownload(inv.id, inv.invoice_number)}
+                      >
+                        <Download className="size-3.5" />
+                        {downloading === inv.id ? "Downloading…" : "Download"}
+                      </Button>
                     )}
                   </td>
                 </tr>

@@ -27,6 +27,7 @@ type UploadedFile = {
   uri: string;
   name: string;
   mimeType: string;
+  fileSize?: number;
   type: 'id' | 'selfie';
 };
 
@@ -63,8 +64,8 @@ export default function VerifyIdentityScreen({ navigation }: Props) {
   const [uploads, setUploads] = useState<UploadedFile[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const addFile = (uri: string, name: string, mimeType: string, type: 'id' | 'selfie') => {
-    setUploads((prev) => [...prev.filter((f) => f.type !== type), { uri, name, mimeType, type }]);
+  const addFile = (uri: string, name: string, mimeType: string, type: 'id' | 'selfie', fileSize?: number) => {
+    setUploads((prev) => [...prev.filter((f) => f.type !== type), { uri, name, mimeType, type, fileSize }]);
   };
 
   const pickImage = async (type: 'id' | 'selfie') => {
@@ -80,7 +81,7 @@ export default function VerifyIdentityScreen({ navigation }: Props) {
     });
     if (result.canceled) return;
     const asset = result.assets[0];
-    addFile(asset.uri, asset.fileName ?? asset.uri.split('/').pop() ?? 'image.jpg', asset.mimeType ?? 'image/jpeg', type);
+    addFile(asset.uri, asset.fileName ?? asset.uri.split('/').pop() ?? 'image.jpg', asset.mimeType ?? 'image/jpeg', type, asset.fileSize);
   };
 
   const pickDocument = async () => {
@@ -90,7 +91,7 @@ export default function VerifyIdentityScreen({ navigation }: Props) {
     });
     if (result.canceled) return;
     const asset = result.assets[0];
-    addFile(asset.uri, asset.name, asset.mimeType ?? 'application/pdf', 'id');
+    addFile(asset.uri, asset.name, asset.mimeType ?? 'application/pdf', 'id', asset.size);
   };
 
   const pickId = () => {
@@ -121,7 +122,7 @@ export default function VerifyIdentityScreen({ navigation }: Props) {
     });
     if (result.canceled) return;
     const asset = result.assets[0];
-    addFile(asset.uri, asset.fileName ?? 'selfie.jpg', asset.mimeType ?? 'image/jpeg', 'selfie');
+    addFile(asset.uri, asset.fileName ?? 'selfie.jpg', asset.mimeType ?? 'image/jpeg', 'selfie', asset.fileSize);
   };
 
   const pickSelfie = () => {
@@ -148,10 +149,14 @@ export default function VerifyIdentityScreen({ navigation }: Props) {
     if (!idFile || !selfieFile) return;
     setIsSubmitting(true);
     try {
-      // Get presigned upload URLs from backend
+      const [idSize, selfieSize] = await Promise.all([
+        idFile.fileSize ?? workerOnboardingService.getLocalFileSize(idFile.uri),
+        selfieFile.fileSize ?? workerOnboardingService.getLocalFileSize(selfieFile.uri),
+      ]);
+      // Get size-bound presigned upload URLs from backend.
       const [idUpload, selfieUpload] = await Promise.all([
-        workerOnboardingService.getUploadUrl('govt_id', idFile.mimeType),
-        workerOnboardingService.getUploadUrl('selfie', selfieFile.mimeType),
+        workerOnboardingService.getUploadUrl('govt_id', idFile.mimeType, idSize),
+        workerOnboardingService.getUploadUrl('selfie', selfieFile.mimeType, selfieSize),
       ]);
 
       let idKey: string;
@@ -166,8 +171,8 @@ export default function VerifyIdentityScreen({ navigation }: Props) {
       } else {
         // Production: upload directly to S3/MinIO
         await Promise.all([
-          workerOnboardingService.uploadToStorage(idUpload.upload_url!, idFile.uri, idFile.mimeType),
-          workerOnboardingService.uploadToStorage(selfieUpload.upload_url!, selfieFile.uri, selfieFile.mimeType),
+          workerOnboardingService.uploadToStorage(idUpload.upload_url!, idFile.uri, idFile.mimeType, idUpload.upload_headers),
+          workerOnboardingService.uploadToStorage(selfieUpload.upload_url!, selfieFile.uri, selfieFile.mimeType, selfieUpload.upload_headers),
         ]);
         idKey = idUpload.s3_key!;
         selfieKey = selfieUpload.s3_key!;

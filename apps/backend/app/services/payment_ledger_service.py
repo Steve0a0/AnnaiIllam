@@ -200,5 +200,62 @@ def validate_manual_payment(
         raise PaymentLedgerError("Payment would exceed the outstanding balance")
 
 
+def validate_gateway_refund(
+    requirement,
+    quote,
+    payments: Iterable,
+    *,
+    source_payment,
+    amount: int,
+) -> None:
+    """Validate a gateway refund and reserve against pending refund attempts."""
+    payment_rows = list(payments)
+    if source_payment.requirement_id != requirement.id:
+        raise PaymentLedgerError("Refund payment does not belong to this requirement")
+    if source_payment.purpose == PaymentPurpose.REFUND.value:
+        raise PaymentLedgerError("A refund row cannot be refunded")
+    if source_payment.payment_mode != "gateway" or not source_payment.gateway_payment_id:
+        raise PaymentLedgerError("Only a captured gateway payment can be refunded through Razorpay")
+    if source_payment.payment_status != ClientPaymentStatus.PAID.value:
+        raise PaymentLedgerError("Only a paid gateway payment can be refunded")
+
+    validate_manual_payment(
+        requirement,
+        quote,
+        payment_rows,
+        amount=amount,
+        purpose=PaymentPurpose.REFUND.value,
+    )
+
+    ledger = build_payment_ledger(quote, payment_rows)
+    pending_refund_reservations = sum(
+        int(payment.amount or 0)
+        for payment in payment_rows
+        if getattr(payment, "purpose", None) == PaymentPurpose.REFUND.value
+        and payment.payment_status == ClientPaymentStatus.PENDING.value
+    )
+    if amount > ledger.total_paid - pending_refund_reservations:
+        raise PaymentLedgerError(
+            "Refund amount cannot exceed the unreserved refundable balance"
+        )
+
+    reserved_for_source = sum(
+        int(payment.amount or 0)
+        for payment in payment_rows
+        if getattr(payment, "parent_payment_id", None) == source_payment.id
+        and getattr(payment, "purpose", None) == PaymentPurpose.REFUND.value
+        and payment.payment_status
+        in {
+            ClientPaymentStatus.PENDING.value,
+            ClientPaymentStatus.PAID.value,
+            ClientPaymentStatus.REFUNDED.value,
+        }
+    )
+    if amount > int(source_payment.amount or 0) - reserved_for_source:
+        raise PaymentLedgerError(
+            "Refund amount cannot exceed this payment's remaining refundable balance"
+        )
+
+
 def has_required_advance(quote, payments: Iterable) -> bool:
     return build_payment_ledger(quote, payments).advance_due == 0

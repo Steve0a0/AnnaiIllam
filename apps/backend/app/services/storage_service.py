@@ -7,9 +7,39 @@ reviewed from the admin dashboard without any paid storage service.
 """
 
 from pathlib import Path
+import re
 import uuid
 
 from app.core.config import settings
+from app.core.file_upload_constants import (
+    MAGIC_BYTES_READ_LENGTH,
+    MIME_TYPE_EXTENSIONS,
+    detect_content_type,
+    normalize_content_type,
+    validate_upload_declaration,
+)
+
+
+class DocumentUploadValidationError(ValueError):
+    """A stored object cannot be activated as a worker document."""
+
+
+def _expected_key_prefix(user_id: int, document_type: str) -> str:
+    return f"workers/{user_id}/{document_type}/"
+
+
+def _expected_local_key_prefix(user_id: int, document_type: str) -> str:
+    return f"worker-documents/{user_id}/{document_type}/"
+
+
+def _validate_s3_key(key: str, user_id: int, document_type: str) -> None:
+    prefix = _expected_key_prefix(user_id, document_type)
+    suffixes = "|".join(MIME_TYPE_EXTENSIONS.values())
+    pattern = rf"^{re.escape(prefix)}[0-9a-f]{{32}}\.({suffixes})$"
+    if not re.fullmatch(pattern, key):
+        raise DocumentUploadValidationError(
+            "Object key is not owned by this user and document type"
+        )
 
 
 def _get_s3_client(*, public_endpoint: bool = False):
@@ -47,15 +77,13 @@ def generate_upload_url(
     user_id: int,
     document_type: str,
     content_type: str,
+    content_length: int,
     expires_in: int = 300,
-) -> tuple[str, str]:
-    ext_map = {
-        "image/jpeg": "jpg",
-        "image/png": "png",
-        "image/webp": "webp",
-        "application/pdf": "pdf",
-    }
-    ext = ext_map.get(content_type, "bin")
+) -> tuple[str, str, dict[str, str]]:
+    content_type = validate_upload_declaration(
+        document_type, content_type, content_length
+    )
+    ext = MIME_TYPE_EXTENSIONS[content_type]
     s3_key = f"workers/{user_id}/{document_type}/{uuid.uuid4().hex}.{ext}"
 
     s3 = _get_s3_client(public_endpoint=True)
@@ -64,6 +92,11 @@ def generate_upload_url(
         "Bucket": settings.s3_bucket,
         "Key": s3_key,
         "ContentType": content_type,
+        "ContentLength": content_length,
+        "Metadata": {
+            "user-id": str(user_id),
+            "document-type": document_type,
+        },
     }
     if _is_aws():
         put_params["ServerSideEncryption"] = "aws:kms"
@@ -75,7 +108,52 @@ def generate_upload_url(
         HttpMethod="PUT",
     )
 
-    return url, s3_key
+    return url, s3_key, {
+        "Content-Type": content_type,
+        "x-amz-meta-user-id": str(user_id),
+        "x-amz-meta-document-type": document_type,
+    }
+
+
+def validate_stored_document(
+    *, s3_key: str, user_id: int, document_type: str
+) -> tuple[int, str]:
+    """Validate ownership, metadata, length, declared MIME, and magic bytes."""
+    _validate_s3_key(s3_key, user_id, document_type)
+    s3 = _get_s3_client()
+    try:
+        head = s3.head_object(Bucket=settings.s3_bucket, Key=s3_key)
+    except Exception as exc:
+        response = getattr(exc, "response", {})
+        code = str(response.get("Error", {}).get("Code", ""))
+        if code in {"404", "NoSuchKey", "NotFound"}:
+            raise DocumentUploadValidationError("Uploaded object does not exist") from exc
+        raise RuntimeError("Unable to inspect uploaded object") from exc
+
+    size = int(head.get("ContentLength", 0))
+    content_type = normalize_content_type(str(head.get("ContentType", "")))
+    try:
+        validate_upload_declaration(document_type, content_type, size)
+    except ValueError as exc:
+        raise DocumentUploadValidationError(str(exc)) from exc
+
+    metadata = {str(key).lower(): str(value) for key, value in head.get("Metadata", {}).items()}
+    if metadata.get("user-id") != str(user_id) or metadata.get("document-type") != document_type:
+        raise DocumentUploadValidationError("Uploaded object metadata does not match its owner and type")
+
+    try:
+        response = s3.get_object(
+            Bucket=settings.s3_bucket,
+            Key=s3_key,
+            Range=f"bytes=0-{MAGIC_BYTES_READ_LENGTH - 1}",
+        )
+        prefix = response["Body"].read(MAGIC_BYTES_READ_LENGTH)
+    except Exception as exc:
+        raise RuntimeError("Unable to inspect uploaded object content") from exc
+    detected = detect_content_type(prefix)
+    if detected != content_type:
+        raise DocumentUploadValidationError("File content does not match its content type")
+    return size, content_type
 
 
 def generate_download_url(s3_key: str, expires_in: int = 900) -> str:
@@ -88,6 +166,11 @@ def generate_download_url(s3_key: str, expires_in: int = 900) -> str:
 
 
 def build_public_s3_url(s3_key: str) -> str:
+    if settings.s3_public_endpoint_url:
+        return (
+            f"{settings.s3_public_endpoint_url.rstrip('/')}/"
+            f"{settings.s3_bucket}/{s3_key}"
+        )
     return f"https://{settings.s3_bucket}.s3.{settings.s3_region}.amazonaws.com/{s3_key}"
 
 
@@ -103,14 +186,63 @@ def save_local_document(
     user_id: int,
     document_type: str,
     filename: str,
+    content_type: str,
     content: bytes,
 ) -> tuple[str, str]:
-    suffix = Path(filename).suffix.lower() or ".bin"
-    local_key = f"worker-documents/{user_id}/{document_type}/{uuid.uuid4().hex}{suffix}"
+    del filename  # the key extension is derived from verified bytes, not client input
+    content_type = validate_upload_declaration(document_type, content_type, len(content))
+    detected = detect_content_type(content[:MAGIC_BYTES_READ_LENGTH])
+    if detected != content_type:
+        raise DocumentUploadValidationError("File content does not match its content type")
+    suffix = MIME_TYPE_EXTENSIONS[content_type]
+    local_key = f"worker-documents/{user_id}/{document_type}/{uuid.uuid4().hex}.{suffix}"
     destination = get_local_upload_root() / local_key
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(content)
     return f"local:{local_key}", str(destination)
+
+
+def validate_local_document(
+    *, local_key: str, user_id: int, document_type: str
+) -> tuple[int, str]:
+    if not local_key.startswith("local:"):
+        raise DocumentUploadValidationError("Local document reference is invalid")
+    relative_key = local_key.removeprefix("local:")
+    if not relative_key.startswith(_expected_local_key_prefix(user_id, document_type)):
+        raise DocumentUploadValidationError(
+            "Local object key is not owned by this user and document type"
+        )
+    path = resolve_local_document_path(local_key)
+    if not path.is_file():
+        raise DocumentUploadValidationError("Uploaded object does not exist")
+    size = path.stat().st_size
+    with path.open("rb") as source:
+        prefix = source.read(MAGIC_BYTES_READ_LENGTH)
+    detected = detect_content_type(prefix)
+    if detected is None:
+        raise DocumentUploadValidationError("Unsupported file content")
+    try:
+        validate_upload_declaration(document_type, detected, size)
+    except ValueError as exc:
+        raise DocumentUploadValidationError(str(exc)) from exc
+    expected_extension = MIME_TYPE_EXTENSIONS[detected]
+    if path.suffix.lower() != f".{expected_extension}":
+        raise DocumentUploadValidationError("File extension does not match its content")
+    return size, detected
+
+
+def validate_document_reference(
+    *, key: str, user_id: int, document_type: str
+) -> tuple[int, str]:
+    if is_s3_configured():
+        if key.startswith("local:"):
+            raise DocumentUploadValidationError("Local document keys are disabled")
+        return validate_stored_document(
+            s3_key=key, user_id=user_id, document_type=document_type
+        )
+    return validate_local_document(
+        local_key=key, user_id=user_id, document_type=document_type
+    )
 
 
 def resolve_local_document_path(local_key_or_url: str) -> Path:

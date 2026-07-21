@@ -32,9 +32,13 @@ class Settings(BaseSettings):
     otp_length: int = 6
     otp_max_attempts: int = 5
 
+    # Social providers are opt-in. Enabling one without its audience config is
+    # a startup error in every environment.
+    google_auth_enabled: bool = False
     google_client_id: str = ""          # Web client ID
     google_ios_client_id: str = ""       # iOS client ID
     google_android_client_id: str = ""   # Android client ID
+    apple_auth_enabled: bool = False
     apple_app_bundle_id: str = ""
 
     backend_cors_origins: str = ""
@@ -105,6 +109,17 @@ class Settings(BaseSettings):
     gmail_user: str = ""
     gmail_app_password: str = ""
 
+    # GST tax-invoice identity. Configure with values approved by Finance/CA.
+    # The invoice service refuses to generate a draft while any value is absent.
+    invoice_supplier_legal_name: str = ""
+    invoice_supplier_address: str = ""
+    invoice_supplier_gstin: str = ""
+    invoice_supplier_state: str = ""
+    invoice_supplier_state_code: str = ""
+    invoice_default_sac_code: str = ""
+    invoice_default_gst_rate: float = Field(default=18.0, ge=0, le=100)
+    invoice_authorised_signatory: str = ""
+
     # Sentry error monitoring. Leave SENTRY_DSN empty to disable.
     sentry_dsn: str = ""
     sentry_environment: str = ""
@@ -121,6 +136,18 @@ class Settings(BaseSettings):
     @property
     def backend_cors_origins_list(self) -> List[str]:
         return [item.strip() for item in self.backend_cors_origins.split(",") if item.strip()]
+
+    @property
+    def google_audiences(self) -> frozenset[str]:
+        return frozenset(
+            client_id.strip()
+            for client_id in (
+                self.google_client_id,
+                self.google_ios_client_id,
+                self.google_android_client_id,
+            )
+            if client_id.strip()
+        )
 
     @property
     def is_local(self) -> bool:
@@ -163,6 +190,15 @@ class Settings(BaseSettings):
         """Fail fast at startup when required production settings are missing."""
         is_prod_like = self.app_env in {"staging", "production"}
         errors: list[str] = []
+
+        if self.google_auth_enabled and not self.google_audiences:
+            errors.append(
+                "GOOGLE_AUTH_ENABLED=true requires at least one configured Google client ID."
+            )
+        if self.apple_auth_enabled and not self.apple_app_bundle_id.strip():
+            errors.append(
+                "APPLE_AUTH_ENABLED=true requires APPLE_APP_BUNDLE_ID."
+            )
 
         if is_prod_like and not self.field_encryption_key:
             errors.append(
@@ -222,6 +258,10 @@ class Settings(BaseSettings):
             errors.append(
                 "S3_BUCKET must be set in staging/production. "
                 "Worker ID documents and selfies are stored in S3."
+            )
+        if is_prod_like and not self.selfie_bucket_domain:
+            errors.append(
+                "SELFIE_BUCKET_DOMAIN must be set in staging/production so selfie references are restricted to owned storage."
             )
         if is_prod_like and self.s3_bucket and not self.aws_access_key_id:
             errors.append("AWS_ACCESS_KEY_ID must be set when S3_BUCKET is configured.")

@@ -8,7 +8,20 @@ Exercises every major domain boundary in one linear sequence:
 from datetime import date, timedelta
 from unittest.mock import patch
 
+import pytest
+
 BASE = "/api/v1"
+
+# Minimal valid JPEG for the KYC upload flow (magic bytes 0xFFD8FF …).
+_JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9"
+
+
+@pytest.fixture(autouse=True)
+def _local_storage_mode(monkeypatch):
+    """Force local-filesystem storage (no S3) so this test doesn't depend on the
+    developer's .env — matches CI, which configures no S3."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "s3_bucket", "")
 
 
 def _ok(response, step: str) -> dict:
@@ -92,9 +105,18 @@ def test_full_staffing_flow(
     worker_user_id = worker_auth["user"]["id"]
 
     # ── Step 7: Worker submits identity documents ──────────────────────────
+    def _upload_kyc(doc_type: str) -> str:
+        rr = client.post(
+            f"{BASE}/worker/onboarding/local-upload",
+            params={"document_type": doc_type},
+            files={"file": (f"{doc_type}.jpg", _JPEG, "image/jpeg")},
+            headers=worker_headers,
+        )
+        return _ok(rr, f"worker upload {doc_type}")["local_key"]
+
     r = client.post(f"{BASE}/worker/onboarding/identity", json={
-        "govt_id_key": "local:e2e_govt_id.jpg",
-        "selfie_key": "local:e2e_selfie.jpg",
+        "govt_id_key": _upload_kyc("govt_id"),
+        "selfie_key": _upload_kyc("selfie"),
     }, headers=worker_headers)
     _ok(r, "worker submit identity")
 

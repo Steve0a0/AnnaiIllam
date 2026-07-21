@@ -19,6 +19,11 @@ from app.services.payment_reconciliation_service import (
     PaymentOrderNotFoundError,
     reconcile_captured_gateway_payment,
 )
+from app.services.payment_refund_service import (
+    RefundIntentNotFoundError,
+    RefundReconciliationError,
+    reconcile_gateway_refund,
+)
 from app.services.webhook_security import verify_webhook_signature
 from app.utils.audit import audit_event
 from app.utils.response import success_response
@@ -150,6 +155,75 @@ async def razorpay_webhook(
         raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
 
     event_type = event_data.get("event")
+    if event_type in {"refund.created", "refund.processed", "refund.failed"}:
+        try:
+            refund_entity = event_data["payload"]["refund"]["entity"]
+            razorpay_refund_id = refund_entity["id"]
+        except (KeyError, TypeError) as exc:
+            security_logger.error("Malformed Razorpay refund webhook payload: %s", exc)
+            raise HTTPException(status_code=400, detail="Malformed refund webhook payload") from exc
+
+        check_rate_limit(
+            f"razorpay_webhook_refund:{razorpay_refund_id}",
+            limit=20,
+            window_seconds=300,
+        )
+        try:
+            result = reconcile_gateway_refund(db, refund_entity)
+        except RefundIntentNotFoundError as exc:
+            db.rollback()
+            security_logger.error(
+                "Razorpay refund intent not found | refund_id=%s event=%s",
+                razorpay_refund_id,
+                event_type,
+            )
+            audit_event(
+                "razorpay_refund_intent_not_found",
+                {"gateway_refund_id": razorpay_refund_id, "event": event_type},
+            )
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RefundReconciliationError as exc:
+            db.rollback()
+            security_logger.error(
+                "Razorpay refund not reconciled | refund_id=%s event=%s reason=%s",
+                razorpay_refund_id,
+                event_type,
+                exc,
+            )
+            audit_event(
+                "razorpay_refund_webhook_not_reconciled",
+                {
+                    "gateway_refund_id": razorpay_refund_id,
+                    "event": event_type,
+                    "reason": str(exc),
+                },
+            )
+            return success_response(
+                "Refund webhook acknowledged without changing the ledger",
+                {},
+            )
+
+        db.commit()
+        audit_event(
+            "razorpay_refund_webhook_reconciled",
+            {
+                "event_id": request.headers.get("x-razorpay-event-id"),
+                "event": event_type,
+                "refund_payment_id": result.payment.id,
+                "gateway_refund_id": razorpay_refund_id,
+                "gateway_refund_status": result.payment.gateway_refund_status,
+                "changed": result.changed,
+            },
+        )
+        return success_response(
+            "Refund webhook reconciled",
+            {
+                "refund_payment_id": result.payment.id,
+                "status": result.payment.payment_status,
+                "gateway_refund_status": result.payment.gateway_refund_status,
+            },
+        )
+
     if event_type != "payment.captured":
         # Acknowledge unknown events without processing — prevents Razorpay retries.
         return success_response(f"Event '{event_type}' acknowledged but not processed", {})

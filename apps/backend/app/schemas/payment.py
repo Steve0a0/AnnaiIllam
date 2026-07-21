@@ -87,6 +87,23 @@ class RecordManualClientPaymentSchema(BaseModel):
         return strip_optional_text(value)
 
 
+class CreateGatewayRefundSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    amount: int = Field(ge=1)
+    idempotency_key: str = Field(
+        min_length=10,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
+    reason: str = Field(min_length=3, max_length=500)
+
+    @field_validator("idempotency_key", "reason")
+    @classmethod
+    def clean_refund_fields(cls, value: str) -> str:
+        return strip_text(value)
+
+
 class SubmitReferencePaymentSchema(BaseModel):
     """Client submits a manual UTR / UPI reference after making an out-of-app transfer."""
 

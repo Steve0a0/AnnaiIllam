@@ -10,6 +10,7 @@ from app.services.payment_ledger_service import (
     calculate_quote_total,
     derive_client_payment_intent,
     has_required_advance,
+    validate_gateway_refund,
     validate_manual_payment,
 )
 
@@ -23,7 +24,7 @@ def quote(total=30000, advance=5000, model="client_pays_company"):
 
 
 def requirement(status="approved"):
-    return SimpleNamespace(status=status)
+    return SimpleNamespace(id=1, status=status)
 
 
 def payment(amount, status="paid", purpose=PaymentPurpose.ADJUSTMENT.value):
@@ -96,6 +97,38 @@ def test_overpayment_and_excess_refund_are_rejected():
             [payment(3000)],
             amount=3001,
             purpose=PaymentPurpose.REFUND.value,
+        )
+
+
+def test_pending_gateway_refunds_reserve_the_refundable_balance():
+    source_payment = SimpleNamespace(
+        id=1,
+        requirement_id=1,
+        amount=3000,
+        payment_status="paid",
+        purpose=PaymentPurpose.ADVANCE.value,
+        payment_mode="gateway",
+        gateway_payment_id="pay_captured",
+        parent_payment_id=None,
+    )
+    pending_refund = SimpleNamespace(
+        id=2,
+        requirement_id=1,
+        amount=2000,
+        payment_status="pending",
+        purpose=PaymentPurpose.REFUND.value,
+        payment_mode="gateway",
+        gateway_payment_id=None,
+        parent_payment_id=99,
+    )
+
+    with pytest.raises(PaymentLedgerError, match="unreserved"):
+        validate_gateway_refund(
+            requirement("cancelled"),
+            quote(total=10000, advance=1000),
+            [source_payment, pending_refund],
+            source_payment=source_payment,
+            amount=1001,
         )
 
 

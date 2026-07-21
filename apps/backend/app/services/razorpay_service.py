@@ -75,6 +75,39 @@ def fetch_payment(razorpay_payment_id: str) -> dict:
     return response.json()
 
 
+def create_refund(
+    razorpay_payment_id: str,
+    amount_rupees: int,
+    idempotency_key: str,
+    *,
+    receipt: str,
+    notes: dict | None = None,
+) -> dict:
+    """Create an idempotent normal refund for a captured Razorpay payment."""
+    payment_id = quote(razorpay_payment_id, safe="")
+    response = httpx.post(
+        f"{_RAZORPAY_API_BASE}/payments/{payment_id}/refund",
+        auth=(settings.razorpay_key_id, settings.razorpay_key_secret),
+        headers={"X-Refund-Idempotency": idempotency_key},
+        json={
+            "amount": amount_rupees * 100,
+            "speed": "normal",
+            "receipt": receipt,
+            "notes": notes or {},
+        },
+        timeout=_REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    refund = response.json()
+    logger.info(
+        "Razorpay refund requested | refund_id=%s payment_id=%s status=%s",
+        refund.get("id"),
+        razorpay_payment_id,
+        refund.get("status"),
+    )
+    return refund
+
+
 def verify_payment_signature(
     razorpay_order_id: str,
     razorpay_payment_id: str,

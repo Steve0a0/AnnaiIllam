@@ -1,6 +1,7 @@
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
+from app.core.payment_constants import ClientPaymentStatus, PaymentPurpose
 from app.models.client_payment import ClientPayment
 from app.models.worker_payout import WorkerPayout
 
@@ -13,6 +14,42 @@ def create_client_payment(db: Session, payment: ClientPayment) -> ClientPayment:
 
 def get_client_payment_by_id(db: Session, payment_id: int) -> ClientPayment | None:
     stmt = select(ClientPayment).where(ClientPayment.id == payment_id)
+    return db.execute(stmt).scalar_one_or_none()
+
+
+def get_client_payment_by_id_for_update(
+    db: Session,
+    payment_id: int,
+) -> ClientPayment | None:
+    stmt = (
+        select(ClientPayment)
+        .where(ClientPayment.id == payment_id)
+        .with_for_update()
+    )
+    return db.execute(stmt).scalar_one_or_none()
+
+
+def get_client_refund_by_idempotency_key_for_update(
+    db: Session,
+    idempotency_key: str,
+) -> ClientPayment | None:
+    stmt = (
+        select(ClientPayment)
+        .where(ClientPayment.refund_idempotency_key == idempotency_key)
+        .with_for_update()
+    )
+    return db.execute(stmt).scalar_one_or_none()
+
+
+def get_client_refund_by_gateway_refund_id_for_update(
+    db: Session,
+    gateway_refund_id: str,
+) -> ClientPayment | None:
+    stmt = (
+        select(ClientPayment)
+        .where(ClientPayment.gateway_refund_id == gateway_refund_id)
+        .with_for_update()
+    )
     return db.execute(stmt).scalar_one_or_none()
 
 
@@ -103,9 +140,33 @@ def count_worker_payouts(db: Session) -> int:
 
 
 def sum_client_payments_paid(db: Session) -> int:
-    stmt = select(func.coalesce(func.sum(ClientPayment.amount), 0)).where(
-        ClientPayment.payment_status == "paid"
+    net_amount = case(
+        (
+            (
+                ClientPayment.purpose == PaymentPurpose.REFUND.value
+            )
+            & (
+                ClientPayment.payment_status.in_(
+                    [
+                        ClientPaymentStatus.PAID.value,
+                        ClientPaymentStatus.REFUNDED.value,
+                    ]
+                )
+            ),
+            -ClientPayment.amount,
+        ),
+        (
+            (
+                ClientPayment.purpose != PaymentPurpose.REFUND.value
+            )
+            & (
+                ClientPayment.payment_status == ClientPaymentStatus.PAID.value
+            ),
+            ClientPayment.amount,
+        ),
+        else_=0,
     )
+    stmt = select(func.coalesce(func.sum(net_amount), 0))
     return db.execute(stmt).scalar_one()
 
 

@@ -11,7 +11,8 @@ checkout signatures, or webhook secrets into tickets, logs, or screenshots.
   Razorpay test-mode account.
 - Razorpay Dashboard has a test-mode webhook pointing to:
   `https://<staging-host>/api/v1/payments/webhook/razorpay`.
-- Only `payment.captured` is required for this proof.
+- Enable payment.captured, refund.created, refund.processed, and refund.failed
+  for the combined payment/refund proof.
 - Automatic capture is enabled for the test account.
 
 ## End-to-end proof
@@ -53,6 +54,25 @@ Repeat with a second controlled payment, but delay the mobile callback:
 4. Confirm the callback returns HTTP 200, stores the checkout signature if
    absent, and does not create or recount a payment.
 
+## Refund proof
+
+Use the captured test payment from the end-to-end proof:
+
+1. As a finance-admin, send a partial whole-rupee refund to
+   POST /api/v1/admin/finance/client-payments/{payment_id}/refunds with an
+   approval reason and a unique idempotency key of at least 10 characters.
+2. Confirm the returned Razorpay refund ID appears in the test-mode Dashboard
+   and the refund amount there equals the requested rupees multiplied by 100.
+3. If the response is pending, deliver or replay the matching refund.processed
+   webhook.
+4. Confirm the linked local refund row is paid/processed, references the source
+   payment, and the requirement ledger reports gross paid minus refunded as net
+   paid with the corresponding outstanding balance.
+5. Repeat the exact admin request with the same idempotency key. Confirm HTTP
+   200, one local refund row, and one Razorpay refund.
+6. Attempt another refund above the remaining source balance and confirm it is
+   rejected before any Razorpay call.
+
 ## Evidence to retain
 
 - Date/time and tester.
@@ -61,6 +81,8 @@ Repeat with a second controlled payment, but delay the mobile callback:
 - Expected rupees and observed paise.
 - Callback-first and webhook-first HTTP results.
 - Ledger row count/status before and after duplicate delivery.
+- Refund ledger row, source payment link, idempotency retry result, and final
+  Razorpay refund status.
 - Razorpay Dashboard screenshot with secrets and customer data redacted.
 
 Live-mode activation still requires Finance Owner, Product Owner, and Tech Lead

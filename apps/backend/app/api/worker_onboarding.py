@@ -19,6 +19,12 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies.roles import require_role
 from app.core.encryption import encrypt_optional
+from app.core.file_upload_constants import (
+    ALLOWED_DOCUMENT_TYPES,
+    DOCUMENT_MAX_SIZE_BYTES,
+    DOCUMENT_MIME_TYPES,
+    validate_upload_declaration,
+)
 from app.core.roles import UserRole
 from app.db.deps import get_db
 from app.models.user import User
@@ -26,19 +32,17 @@ from app.models.worker_document import WorkerDocument
 from app.models.worker_profile import WorkerProfile
 from app.repositories.profile_repository import get_worker_profile_by_user_id
 from app.services.storage_service import (
+    DocumentUploadValidationError,
     build_public_s3_url,
     generate_upload_url,
     is_s3_configured,
     save_local_document,
+    validate_document_reference,
 )
 from app.utils.audit import audit_event
 from app.utils.response import success_response
 
 router = APIRouter(prefix="/worker/onboarding", tags=["Worker Onboarding"])
-
-ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "application/pdf"}
-
-ALLOWED_DOCUMENT_TYPES = {"govt_id", "selfie"}
 
 EXPERIENCE_OPTIONS = {"< 1 year", "1–2 years", "3–5 years", "5+ years"}
 
@@ -50,6 +54,7 @@ class UploadUrlRequest(BaseModel):
 
     document_type: str = Field(pattern=r"^(govt_id|selfie)$")
     content_type: str
+    file_size: int = Field(ge=1)
 
 
 class IdentitySubmitRequest(BaseModel):
@@ -122,11 +127,15 @@ def get_upload_url(
     If S3 is not configured (local dev), returns a placeholder instructing the
     client to pass the local URI directly to /identity.
     """
-    if payload.content_type not in ALLOWED_CONTENT_TYPES:
+    try:
+        content_type = validate_upload_declaration(
+            payload.document_type, payload.content_type, payload.file_size
+        )
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Unsupported content type. Allowed: {', '.join(sorted(ALLOWED_CONTENT_TYPES))}",
-        )
+            detail=str(exc),
+        ) from exc
 
     if not is_s3_configured():
         # Local dev mode: mobile app will pass the local URI as the key
@@ -135,20 +144,26 @@ def get_upload_url(
             {
                 "upload_url": None,
                 "s3_key": None,
+                "upload_headers": {},
+                "max_size_bytes": DOCUMENT_MAX_SIZE_BYTES[payload.document_type],
                 "dev_mode": True,
             },
         )
 
-    upload_url, s3_key = generate_upload_url(
+    upload_url, s3_key, upload_headers = generate_upload_url(
         user_id=current_user.id,
         document_type=payload.document_type,
-        content_type=payload.content_type,
+        content_type=content_type,
+        content_length=payload.file_size,
     )
     return success_response(
         "Presigned upload URL generated",
         {
             "upload_url": upload_url,
             "s3_key": s3_key,
+            "object_url": build_public_s3_url(s3_key),
+            "upload_headers": upload_headers,
+            "max_size_bytes": DOCUMENT_MAX_SIZE_BYTES[payload.document_type],
             "expires_in_seconds": 300,
             "dev_mode": False,
         },
@@ -177,19 +192,31 @@ async def upload_local_document(
             detail=f"document_type must be one of: {', '.join(sorted(ALLOWED_DOCUMENT_TYPES))}",
         )
 
-    if file.content_type not in ALLOWED_CONTENT_TYPES:
+    content_type = file.content_type or ""
+    if content_type not in DOCUMENT_MIME_TYPES[document_type]:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Unsupported content type. Allowed: {', '.join(sorted(ALLOWED_CONTENT_TYPES))}",
+            detail=(
+                "Unsupported content type. Allowed: "
+                + ", ".join(sorted(DOCUMENT_MIME_TYPES[document_type]))
+            ),
         )
 
-    content = await file.read()
-    local_key, _path = save_local_document(
-        user_id=current_user.id,
-        document_type=document_type,
-        filename=file.filename or f"{document_type}.bin",
-        content=content,
-    )
+    max_size = DOCUMENT_MAX_SIZE_BYTES[document_type]
+    content = await file.read(max_size + 1)
+    try:
+        local_key, _path = save_local_document(
+            user_id=current_user.id,
+            document_type=document_type,
+            filename=file.filename or f"{document_type}.bin",
+            content_type=content_type,
+            content=content,
+        )
+    except (ValueError, DocumentUploadValidationError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     return success_response("Document uploaded locally", {"local_key": local_key})
 
 
@@ -204,6 +231,28 @@ def submit_identity(
     Called AFTER the mobile app has uploaded files to S3 (or in dev, passes local URIs).
     Advances onboarding_step to "identity_uploaded".
     """
+    # Validate both objects before changing the user's current document set.
+    for document_type, key in (
+        ("govt_id", payload.govt_id_key),
+        ("selfie", payload.selfie_key),
+    ):
+        try:
+            validate_document_reference(
+                key=key,
+                user_id=current_user.id,
+                document_type=document_type,
+            )
+        except DocumentUploadValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Invalid {document_type}: {exc}",
+            ) from exc
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Unable to verify {document_type} storage object",
+            ) from exc
+
     # Remove any previously submitted (pending) docs for this user
     db.query(WorkerDocument).filter(
         WorkerDocument.user_id == current_user.id,
@@ -211,8 +260,7 @@ def submit_identity(
     ).delete(synchronize_session="fetch")
 
     def _make_doc(doc_type: str, key: str) -> WorkerDocument:
-        is_local = key.startswith("local:")
-        is_s3 = is_s3_configured() and not is_local and not key.startswith("/") and not key.startswith("file://")
+        is_s3 = is_s3_configured()
         return WorkerDocument(
             user_id=current_user.id,
             worker_profile_id=None,

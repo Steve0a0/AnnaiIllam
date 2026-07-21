@@ -20,4 +20,11 @@ export const invoicesService = {
     const res = await http.post(`/admin/invoices/${invoiceId}/issue`);
     return res.data;
   },
+
+  getDocument: async (invoiceId: number): Promise<Blob> => {
+    const res = await http.get<Blob>(`/admin/invoices/${invoiceId}/document.html`, {
+      responseType: "blob",
+    });
+    return res.data;
+  },
 };

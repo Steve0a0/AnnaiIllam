@@ -18,8 +18,26 @@ from app.models.client_profile import ClientProfile
 from app.models.quote import Quote
 from app.models.requirement import Requirement
 from app.services.token_service import build_token_pair
+from app.core.config import settings
 
 BASE = "/api/v1"
+
+
+@pytest.fixture(autouse=True)
+def gst_invoice_configuration(monkeypatch):
+    """Use an explicitly fake but structurally valid GST identity in tests."""
+    values = {
+        "invoice_supplier_legal_name": "Annai Illam Test Private Limited",
+        "invoice_supplier_address": "1 Test Road, Chennai, Tamil Nadu 600001",
+        "invoice_supplier_gstin": "33ABCDE1234F1Z5",
+        "invoice_supplier_state": "Tamil Nadu",
+        "invoice_supplier_state_code": "33",
+        "invoice_default_sac_code": "998513",
+        "invoice_default_gst_rate": 18.0,
+        "invoice_authorised_signatory": "Test Finance Officer",
+    }
+    for key, value in values.items():
+        monkeypatch.setattr(settings, key, value)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -133,7 +151,12 @@ def test_generate_invoice_for_completed_requirement(
     assert data["total_amount"] == 11800        # 10000 + 1800
     assert data["requirement_id"] == req.id
     assert data["client_id"] == client_profile.id
-    assert data["invoice_number"].startswith("INV-")
+    assert data["invoice_number"].startswith("DRAFT-")
+    assert data["cgst_rate"] == 9.0
+    assert data["cgst_amount"] == 900
+    assert data["sgst_rate"] == 9.0
+    assert data["sgst_amount"] == 900
+    assert data["igst_amount"] == 0
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -154,6 +177,19 @@ def test_generate_invoice_in_progress_requirement(
     )
     assert resp.status_code == 400
     assert "completed" in resp.json()["message"].lower()
+
+
+def test_client_payload_cannot_override_gst_rate(
+    client, db, admin_headers, admin_user, client_user, client_profile
+):
+    req = _make_requirement(db, client_profile, client_user, RequirementStatus.COMPLETED.value)
+    _make_quote(db, req, admin_user, quoted_amount=10000)
+    response = client.post(
+        f"{BASE}/admin/invoices/generate",
+        json={"requirement_id": req.id, "gst_rate": 0},
+        headers=admin_headers,
+    )
+    assert response.status_code == 422
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -213,6 +249,9 @@ def test_issue_invoice_sends_notification(
         data = issue_resp.json()["data"]
         assert data["status"] == "issued"
         assert data["issued_at"] is not None
+        assert data["invoice_number"].startswith("AI/")
+        assert data["financial_year"] is not None
+        assert data["content_sha256"] is not None
         mock_push.assert_called_once()
         call_kwargs = mock_push.call_args.kwargs
         assert call_kwargs["user_id"] == client_user.id
@@ -261,6 +300,11 @@ def test_client_sees_only_own_invoices(
         headers=admin_headers,
     )
     assert gen1.status_code == 200
+    issue1 = client.post(
+        f"{BASE}/admin/invoices/{gen1.json()['data']['id']}/issue",
+        headers=admin_headers,
+    )
+    assert issue1.status_code == 200
 
     # Requirement + invoice for the other client
     req2 = Requirement(
@@ -288,6 +332,11 @@ def test_client_sees_only_own_invoices(
         headers=admin_headers,
     )
     assert gen2.status_code == 200
+    issue2 = client.post(
+        f"{BASE}/admin/invoices/{gen2.json()['data']['id']}/issue",
+        headers=admin_headers,
+    )
+    assert issue2.status_code == 200
 
     # Primary client should see only their invoice
     access_token, _ = build_token_pair(
@@ -330,7 +379,7 @@ def test_generate_invoice_requires_admin(
 
 
 def test_client_get_invoice_by_id(
-    client, db, admin_headers, admin_user, client_user, client_profile
+    client, db, admin_headers, client_headers, admin_user, client_user, client_profile
 ):
     req = _make_requirement(db, client_profile, client_user, RequirementStatus.COMPLETED.value)
     _make_quote(db, req, admin_user, quoted_amount=5000)
@@ -343,6 +392,16 @@ def test_client_get_invoice_by_id(
     assert gen_resp.status_code == 200
     invoice_id = gen_resp.json()["data"]["id"]
 
+    # Drafts are internal and must not be disclosed to clients.
+    draft_resp = client.get(
+        f"{BASE}/client/invoices/{invoice_id}", headers=client_headers
+    )
+    assert draft_resp.status_code == 404
+    issue_resp = client.post(
+        f"{BASE}/admin/invoices/{invoice_id}/issue", headers=admin_headers
+    )
+    assert issue_resp.status_code == 200
+
     access_token, _ = build_token_pair(
         db,
         user_id=client_user.id,
@@ -354,3 +413,92 @@ def test_client_get_invoice_by_id(
     detail_resp = client.get(f"{BASE}/client/invoices/{invoice_id}", headers=headers)
     assert detail_resp.status_code == 200
     assert detail_resp.json()["data"]["id"] == invoice_id
+
+
+def test_interstate_invoice_uses_igst(
+    client, db, admin_headers, admin_user, client_user, client_profile
+):
+    client_profile.state = "Karnataka"
+    client_profile.city = "Bengaluru"
+    client_profile.address = "MG Road"
+    db.commit()
+    req = _make_requirement(db, client_profile, client_user, RequirementStatus.COMPLETED.value)
+    req.state = "Karnataka"
+    req.city = "Bengaluru"
+    db.commit()
+    _make_quote(db, req, admin_user, quoted_amount=10000)
+
+    response = client.post(
+        f"{BASE}/admin/invoices/generate",
+        json={"requirement_id": req.id},
+        headers=admin_headers,
+    )
+    assert response.status_code == 200, response.json()
+    data = response.json()["data"]
+    assert data["place_of_supply_state_code"] == "29"
+    assert data["igst_rate"] == 18.0
+    assert data["igst_amount"] == 1800
+    assert data["cgst_amount"] == 0
+    assert data["sgst_amount"] == 0
+
+
+def test_issued_document_is_identical_for_admin_client_and_email(
+    client, db, admin_headers, client_headers, admin_user, client_user, client_profile
+):
+    from hashlib import sha256
+
+    req = _make_requirement(db, client_profile, client_user, RequirementStatus.COMPLETED.value)
+    _make_quote(db, req, admin_user, quoted_amount=12000)
+    generated = client.post(
+        f"{BASE}/admin/invoices/generate",
+        json={"requirement_id": req.id},
+        headers=admin_headers,
+    )
+    invoice_id = generated.json()["data"]["id"]
+
+    with patch("app.api.admin_invoice.send_tax_invoice") as send_email:
+        issued = client.post(
+            f"{BASE}/admin/invoices/{invoice_id}/issue", headers=admin_headers
+        )
+    assert issued.status_code == 200, issued.json()
+    email_html = send_email.call_args.kwargs["html"]
+    admin_doc = client.get(
+        f"{BASE}/admin/invoices/{invoice_id}/document.html", headers=admin_headers
+    )
+    client_doc = client.get(
+        f"{BASE}/client/invoices/{invoice_id}/document.html", headers=client_headers
+    )
+    assert admin_doc.status_code == client_doc.status_code == 200
+    assert admin_doc.content == client_doc.content == email_html.encode("utf-8")
+    assert sha256(admin_doc.content).hexdigest() == issued.json()["data"]["content_sha256"]
+
+
+def test_issued_invoice_cannot_be_changed_or_deleted(
+    client, db, admin_headers, admin_user, client_user, client_profile
+):
+    from sqlalchemy.exc import StatementError
+    from app.models.invoice import Invoice
+
+    req = _make_requirement(db, client_profile, client_user, RequirementStatus.COMPLETED.value)
+    _make_quote(db, req, admin_user, quoted_amount=9000)
+    generated = client.post(
+        f"{BASE}/admin/invoices/generate",
+        json={"requirement_id": req.id},
+        headers=admin_headers,
+    )
+    invoice_id = generated.json()["data"]["id"]
+    assert client.post(
+        f"{BASE}/admin/invoices/{invoice_id}/issue", headers=admin_headers
+    ).status_code == 200
+
+    invoice = db.get(Invoice, invoice_id)
+    invoice.total_amount += 1
+    with pytest.raises((StatementError, ValueError), match="immutable"):
+        db.commit()
+    db.rollback()
+
+    invoice = db.get(Invoice, invoice_id)
+    db.delete(invoice)
+    with pytest.raises((StatementError, ValueError), match="immutable"):
+        db.commit()
+    db.rollback()

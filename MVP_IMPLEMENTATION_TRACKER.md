@@ -32,10 +32,11 @@ The production audit completed on 2026-07-20 supersedes older readiness claims w
 |---|---|---|---|---|
 | P0 | DONE | PROD-001: Create production hardening release baseline | All/Docs | Branch, freeze, role owners, approval matrix, verified failing gates, audit corrections, and PROD-001–046 register documented |
 | P0 | DONE | PROD-003: Remove unauthenticated user-directory disclosure | Backend | `GET /api/v1/users` is super-admin-only, paginated, excludes phone/email/name, and has router-wide authentication regression coverage; 29 targeted tests pass |
-| P0 | NEEDS_REVIEW | PROD-002: Establish mandatory release gates | All/CI | Workflows and local gates are green, including zero Python audit findings and 796 backend tests; push, rerun GitHub Actions, then activate the documented ruleset |
+| P0 | NEEDS_REVIEW | PROD-002: Establish mandatory release gates | All/CI | Workflows and local gates are green, including zero Python audit findings and 809 backend tests; push, rerun GitHub Actions, then activate the documented ruleset |
 | P0 | NEEDS_REVIEW | PROD-004: Define authoritative payment ledger and invariants | Backend/Product/Finance | Central ledger service, integer-rupee contract, explicit purposes, server-derived client charges, refund/overpayment rules, and lifecycle decision implemented; Product/Finance sign-off pending |
 | P0 | DONE | PROD-005: Verify gateway amount calculation | Backend/Finance | Adapter alone converts authoritative rupees to paise; a real ₹1 test-mode order returned 100 paise in INR |
 | P0 | NEEDS_REVIEW | PROD-006: Make payment verification and webhooks transactional | Backend/Finance | Row-locked capture reconciliation and duplicate/race tests pass; interactive Checkout and public staging webhook proof remain |
+| P0 | NEEDS_REVIEW | ANNAI-7: Execute refunds through Razorpay | Backend/Finance | Implementation and 809 backend tests pass; complete one captured test-mode refund and retain Dashboard/webhook evidence |
 | P0 | DONE | PROD-009: Move scheduler out of API workers | Backend/DevOps | API startup has no scheduler hooks; Compose/systemd run one standalone scheduler process; five regression tests pass |
 | P0 | DONE | PROD-010: Correct no-show timing and rerun safety | Backend/Product | Shift start plus configurable grace, terminal-state exclusion, race-safe inserts, DB uniqueness repair, and 15 focused tests complete |
 | P0 | DONE | PROD-011: Verify timezone-aware business dates | Backend | One `business_date()` helper drives attendance, no-show, quote-expiry, and related date decisions; UTC-boundary tests and 796 backend tests pass |
@@ -231,6 +232,19 @@ All data endpoints confirmed within target via FastAPI middleware `duration_ms` 
 - **Gap: No complaints screens for client or worker in mobile.** No complaint raise, no complaint status tracking on mobile.
 - **State**: Zustand for auth. No other global state.
 - **Icons**: lucide-react-native. **UI**: Tamagui (worker), React Native core styles (client).
+
+## ANNAI-8 GST Tax Invoice Hardening (2026-07-21)
+
+- Backend drafts now snapshot supplier, recipient, SAC, place of supply, and the intrastate CGST/SGST or interstate IGST calculation from server-owned configuration; the client cannot choose the rate or tax amounts.
+- Issuance allocates a consecutive financial-year number under a database row lock, stores the rendered HTML plus SHA-256, and makes the issued row immutable in SQLAlchemy and PostgreSQL.
+- Admin, client/mobile, and email use the same stored issued document. Payment confirmations are explicitly labelled receipts and are not represented as tax invoices.
+- Production status is **NEEDS_REVIEW**: Finance/CA must approve both samples in `docs/GST_INVOICE_CA_REVIEW.md`, approve supplier/SAC/rate/place-of-supply configuration, and decide whether IRN/QR e-invoice integration applies.
+
+## ANNAI-10 Social Authentication Hardening (2026-07-21)
+
+- Google and Apple authentication are disabled by default through explicit provider flags.
+- Enabling Google without at least one registered client audience, or Apple without its bundle ID, prevents backend startup in every environment.
+- Runtime verification fails before network/JWT processing when a provider is disabled or its audience is absent; Google and Apple tokens for other applications are rejected.
 
 ## How To Update This Tracker
 

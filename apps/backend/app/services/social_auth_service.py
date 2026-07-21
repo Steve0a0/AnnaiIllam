@@ -21,6 +21,12 @@ class SocialIdentity:
 
 
 async def verify_google_token(id_token: str) -> SocialIdentity:
+    if not settings.google_auth_enabled:
+        raise ValueError("Google sign-in is disabled")
+    valid_audiences = settings.google_audiences
+    if not valid_audiences:
+        raise ValueError("Google sign-in audience is not configured")
+
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(GOOGLE_TOKENINFO_URL, params={"id_token": id_token})
 
@@ -34,16 +40,7 @@ async def verify_google_token(id_token: str) -> SocialIdentity:
 
     # Validate audience is one of our registered client IDs (web, iOS, or Android).
     # The 'aud' claim equals whichever client ID was used on the device.
-    valid_audiences = {
-        cid
-        for cid in (
-            settings.google_client_id,
-            settings.google_ios_client_id,
-            settings.google_android_client_id,
-        )
-        if cid
-    }
-    if valid_audiences and claims.get("aud") not in valid_audiences:
+    if claims.get("aud") not in valid_audiences:
         raise ValueError("Google token audience mismatch")
 
     exp = int(claims.get("exp", 0))
@@ -69,6 +66,12 @@ async def verify_google_token(id_token: str) -> SocialIdentity:
 
 
 async def verify_apple_token(identity_token: str) -> SocialIdentity:
+    if not settings.apple_auth_enabled:
+        raise ValueError("Apple sign-in is disabled")
+    audience = settings.apple_app_bundle_id.strip()
+    if not audience:
+        raise ValueError("Apple sign-in audience is not configured")
+
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(APPLE_KEYS_URL)
 
@@ -94,9 +97,6 @@ async def verify_apple_token(identity_token: str) -> SocialIdentity:
 
     public_key = jwt.algorithms.RSAAlgorithm.from_jwk(matching_key)
 
-    audience = settings.apple_app_bundle_id or None
-    options: dict = {"verify_aud": bool(audience)}
-
     try:
         claims = jwt.decode(
             identity_token,
@@ -104,7 +104,6 @@ async def verify_apple_token(identity_token: str) -> SocialIdentity:
             algorithms=["RS256"],
             audience=audience,
             issuer=APPLE_ISSUER,
-            options=options,
         )
     except jwt.ExpiredSignatureError as exc:
         raise ValueError("Apple identity token has expired") from exc
