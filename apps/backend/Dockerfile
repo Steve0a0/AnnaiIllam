@@ -37,6 +37,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 EXPOSE 8000
 
-# Use uvicorn with multiple workers for production
-# Pass WEB_CONCURRENCY env var to control worker count (default 2)
+# API workers never start scheduled jobs; app.scheduler_runner is a separate
+# one-replica process. WEB_CONCURRENCY can therefore be tuned independently.
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY:-2} --no-access-log"]

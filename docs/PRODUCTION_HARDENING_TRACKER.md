@@ -90,13 +90,13 @@ Names can replace these role owners when the delivery team is confirmed. Until t
 | PROD-002 | P0 | NEEDS_REVIEW | Tech Lead / DevOps Engineer | Gates implemented in-repo; GitHub branch ruleset activation remains external |
 | PROD-003 | P0 Critical | DONE | Backend Engineer | User directory is super-admin-only, paginated, minimal, and covered by route-authentication regression tests |
 | PROD-004 | P0 Critical | NEEDS_REVIEW | Backend Engineer / Product / Finance | Ledger implementation and tests complete; required Product/Finance sign-off remains pending |
-| PROD-005 | P0 Critical | TODO | Backend Engineer | Fix Razorpay order amount calculation |
-| PROD-006 | P0 Critical | TODO | Backend Engineer | Make payment verification and webhooks transactional |
+| PROD-005 | P0 Critical | DONE | Backend Engineer | Authoritative rupees convert to paise only in the Razorpay adapter; real test-mode order verified |
+| PROD-006 | P0 Critical | NEEDS_REVIEW | Backend Engineer | Row-locked callback/webhook reconciliation and race tests pass; interactive sandbox capture remains |
 | PROD-007 | P0 | TODO | Backend / Admin / Mobile / Finance | Separate payment receipts from GST invoices |
 | PROD-008 | P0 | TODO | Backend Engineer | Fix backend runtime and lint failures |
-| PROD-009 | P0 High | TODO | Backend / DevOps | Move scheduler out of API workers |
-| PROD-010 | P0 High | TODO | Backend Engineer / Product | Correct no-show timing |
-| PROD-011 | P0 | TODO | Backend Engineer | Implement timezone-aware business dates |
+| PROD-009 | P0 High | DONE | Backend / DevOps | API workers contain no scheduler startup; one standalone scheduler replica owns all jobs |
+| PROD-010 | P0 High | DONE | Backend Engineer / Product | No-shows require shift start plus configurable grace and are DB-idempotent |
+| PROD-011 | P0 | DONE | Backend Engineer | One IST business-date helper owns attendance, no-show, quote-expiry, and related calendar decisions |
 | PROD-012 | P1 | TODO | Backend / Database | Harden database constraints and lifecycle retention |
 | PROD-013 | P1 High | TODO | Backend / Mobile | Enforce social-login audiences |
 | PROD-014 | P1 High | TODO | Backend / DevOps | Make critical rate limits fail safely |
@@ -148,10 +148,9 @@ Names can replace these role owners when the delivery team is confirmed. Until t
 ## Next Execution Order
 
 1. Activate the `PROD-002` GitHub branch ruleset with the registered checks.
-2. Obtain Product/Finance sign-off for `PROD-004`, then implement `PROD-005` and `PROD-006`.
-3. `PROD-009` through `PROD-011` — repair scheduler and time handling.
-4. `PROD-008` — restore the backend Ruff gate.
-5. `PROD-031` and `PROD-022` — secure builds and split mobile releases.
+2. Complete the interactive Razorpay sandbox capture/webhook proof for `PROD-006` and obtain Product/Finance sign-off for `PROD-004`.
+3. `PROD-008` — restore the backend Ruff gate.
+4. `PROD-031` and `PROD-022` — secure builds and split mobile releases.
 
 ## PROD-002 Verification Evidence — 2026-07-20
 
@@ -175,8 +174,88 @@ Verification:
 - The exact admin and mobile production audit commands now exit successfully with no high or critical advisories.
 - Backend vulnerable pins were upgraded as a compatible FastAPI/Starlette and pytest/pytest-asyncio set. `python -m pip_audit -r requirements.txt` reports no known vulnerabilities.
 - Docker 29.6.1 is available, but local image builds were not run because PROD-031 has not yet excluded local environment files from Docker build contexts.
-- Admin lint/build, mobile TypeScript, backend Ruff, and the full backend suite are green locally. The backend suite passes 782/782 tests against PostgreSQL and Redis after the dependency upgrades.
+- Admin lint/build, mobile TypeScript, backend Ruff, and the full backend suite are green locally. The backend suite passes 796/796 tests against PostgreSQL and Redis after the dependency, scheduler, no-show, and timezone upgrades.
 - A GitHub rerun is still required to verify the pushed results and identify any remaining container or repository scan findings.
+
+## PROD-009 Verification Evidence — 2026-07-21
+
+Implemented:
+
+- API startup contains no scheduler import, lifespan hook, feature flag, or background task.
+- `python -m app.scheduler_runner` is the only runtime entry point for scheduled jobs.
+- Development and production deployment examples configure exactly one scheduler replica/process while API `WEB_CONCURRENCY` remains independently tunable.
+- API readiness checks PostgreSQL and Redis only; it no longer reads process-local scheduler state.
+
+Verification:
+
+- Scheduler-process regression suite: 5/5 passed, including two API lifespans starting zero scheduler loops and one standalone process starting one loop.
+- `docker compose config --quiet`: passed with one scheduler replica.
+- Backend Ruff: passed.
+- Full PostgreSQL/Redis backend suite: 794/794 passed.
+
+## PROD-010 Verification Evidence — 2026-07-21
+
+Implemented:
+
+- No-show evaluation uses IST and waits for the first parsed `HH:MM` shift start plus `NO_SHOW_GRACE_PERIOD_MINUTES` (default 60).
+- Missing/ambiguous shift starts fail safe and create no attendance record.
+- Only accepted/active assignments inside their effective date window are eligible; cancelled and replaced assignments are excluded.
+- Inserts use a savepoint and the `(assignment_id, attendance_date)` unique key so repeated or racing runs do not duplicate attendance or notifications.
+- Alembic head `b7e1c42d9a60` repairs schema drift by deduplicating legacy rows and creating the unique constraint only when absent.
+
+Verification:
+
+- No-show regression suite: 15/15 passed, including 06:00 deploy safety, grace boundary, configurable grace, rerun idempotency, terminal assignments, and database duplicate rejection.
+- Clean PostgreSQL migration from base to `b7e1c42d9a60`: passed; live constraint inspected as `UNIQUE (assignment_id, attendance_date)`.
+- Focused Ruff: passed.
+- Full PostgreSQL/Redis backend suite: 794/794 passed.
+
+## PROD-011 Verification Evidence — 2026-07-21
+
+Implemented:
+
+- `business_date(at=None)` is the single Asia/Kolkata calendar-date helper; supplied naive timestamps are treated as stored UTC.
+- Worker check-in stores its timestamp in UTC and derives `attendance_date` from that same timestamp in IST, so payroll periods aggregate the correct day.
+- Attendance defaults, no-show evaluation, quote creation/expiry, worker matching, invoice due dates, and dashboard attendance alerts use the same helper.
+- UTC timestamp storage remains unchanged.
+
+Verification:
+
+- Exact IST-midnight boundary coverage: 18:29:59 UTC remains the prior IST day and 18:30:00 UTC starts the next IST day.
+- A 19:30 UTC check-in (01:00 IST) stores the next IST calendar date while retaining the naive UTC check-in timestamp.
+- Focused attendance/payroll/no-show/quote suite: 104/104 passed.
+- Backend Ruff: passed.
+- Full PostgreSQL/Redis backend suite: 796/796 passed.
+
+## PROD-005 and PROD-006 Verification Evidence — 2026-07-21
+
+Implemented:
+
+- The mobile callback verifies its signature with the server-stored order ID,
+  then fetches the payment from Razorpay and requires `captured=true`,
+  `status=captured`, INR, the expected order ID, and the exact ledger amount
+  in paise.
+- Mobile callbacks and `payment.captured` webhooks use one reconciliation
+  service with `SELECT FOR UPDATE`, gateway-order/payment uniqueness, and a
+  savepoint-protected flush.
+- Callback-first and webhook-first delivery produce one paid ledger row.
+  Duplicate webhooks, callbacks, and payment IDs do not change the ledger.
+- The webhook signature is verified over the raw body. Razorpay event IDs are
+  included in reconciliation audit events.
+- The legacy synthetic webhook route is unavailable outside local test mode.
+- The repeatable staging procedure is documented in
+  `docs/RAZORPAY_SANDBOX_VERIFICATION.md`.
+
+Verification:
+
+- Authenticated Razorpay test-mode API call created a ₹1 order as 100 paise,
+  currency INR, status `created`.
+- Payment/ledger/transition suite: 71/71 passed.
+- Full PostgreSQL/Redis backend suite: 802/802 passed.
+- Backend Ruff and `git diff --check`: passed.
+- Remaining external gate: complete interactive test Checkout, captured payment,
+  mobile callback, and public staging webhook delivery/replay. Until retained
+  evidence exists, PROD-006 remains `NEEDS_REVIEW`.
 
 ## PROD-019 and PROD-020 Verification Evidence — 2026-07-21
 

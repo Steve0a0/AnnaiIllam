@@ -1,6 +1,6 @@
 import os
 from typing import List
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _VALID_APP_ENVS = {"local", "staging", "production"}
@@ -88,11 +88,9 @@ class Settings(BaseSettings):
     # checked in for this many hours without checking out. Default 10 hours.
     max_shift_hours: int = 10
 
-    # Whether THIS process runs the in-process background scheduler.
-    # Set RUN_SCHEDULER=false on API containers when a dedicated scheduler
-    # container runs it instead (see root docker-compose.yml) — this is what
-    # guarantees exactly one scheduler regardless of how many API workers run.
-    run_scheduler: bool = True
+    # No-show processing starts only after the parsed shift start plus this
+    # grace period. Keep within one day to avoid silently disabling the job.
+    no_show_grace_period_minutes: int = Field(default=60, ge=0, le=24 * 60)
 
     # Resend — transactional email (invoices, notifications).
     # Obtain API key from https://resend.com/api-keys

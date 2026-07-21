@@ -12,13 +12,16 @@ Covered scenarios:
      in the future) → scheduler ignores them
 """
 
-from datetime import date, timedelta
+from datetime import datetime, time, timedelta
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.core.assignment_constants import AssignmentStatus
 from app.core.attendance_constants import AttendanceStatus
+from app.core.config import settings
 from app.core.statuses import RequirementStatus
 from app.core.scheduler import flag_no_shows
 from app.models.assignment import Assignment
@@ -28,6 +31,7 @@ from app.models.requirement import Requirement
 from app.models.user import User
 from app.models.worker_profile import WorkerProfile
 from app.services.token_service import build_token_pair
+from app.utils.time import IST, business_date
 
 BASE = "/api/v1"
 
@@ -78,7 +82,19 @@ def _make_worker(db, phone: str, email: str) -> tuple:
     return user, profile
 
 
-def _make_requirement(db, client_profile, client_user, status: str, start_offset_days: int = -1, duration_days: int = 5) -> Requirement:
+def _business_time(hour: int, minute: int = 0) -> datetime:
+    return datetime.combine(business_date(), time(hour, minute), tzinfo=IST)
+
+
+def _make_requirement(
+    db,
+    client_profile,
+    client_user,
+    status: str,
+    start_offset_days: int = -1,
+    duration_days: int = 5,
+    shift_details: str | None = "09:00-18:00",
+) -> Requirement:
     req = Requirement(
         client_id=client_profile.id,
         category="Security",
@@ -86,8 +102,9 @@ def _make_requirement(db, client_profile, client_user, status: str, start_offset
         work_location="Gate 1",
         city="Chennai",
         state="Tamil Nadu",
-        start_date=date.today() + timedelta(days=start_offset_days),
+        start_date=business_date() + timedelta(days=start_offset_days),
         duration_days=duration_days,
+        shift_details=shift_details,
         status=status,
         created_by_user_id=client_user.id,
     )
@@ -133,7 +150,7 @@ class TestFlagNoShows:
         asgn = _make_assignment(db, req, wp, admin_user, AssignmentStatus.ACCEPTED.value)
         db.commit()
 
-        result = flag_no_shows(db)
+        result = flag_no_shows(db, now=_business_time(11))
 
         assert result["flagged_no_shows"] == 1
 
@@ -141,7 +158,7 @@ class TestFlagNoShows:
         attendance = db.execute(
             __import__("sqlalchemy").select(Attendance).where(
                 Attendance.assignment_id == asgn.id,
-                Attendance.attendance_date == date.today(),
+                Attendance.attendance_date == business_date(),
             )
         ).scalar_one_or_none()
         assert attendance is not None
@@ -159,7 +176,7 @@ class TestFlagNoShows:
         asgn = _make_assignment(db, req, wp, admin_user, AssignmentStatus.ACTIVE.value)
         db.commit()
 
-        result = flag_no_shows(db)
+        result = flag_no_shows(db, now=_business_time(11))
 
         assert result["flagged_no_shows"] == 1
         db.expire_all()
@@ -182,13 +199,13 @@ class TestFlagNoShows:
         existing_attendance = Attendance(
             assignment_id=asgn.id,
             worker_profile_id=wp.id,
-            attendance_date=date.today(),
+            attendance_date=business_date(),
             status=AttendanceStatus.PRESENT.value,
         )
         db.add(existing_attendance)
         db.commit()
 
-        result = flag_no_shows(db)
+        result = flag_no_shows(db, now=_business_time(11))
 
         assert result["flagged_no_shows"] == 0
 
@@ -200,7 +217,7 @@ class TestFlagNoShows:
         _make_assignment(db, req, wp, admin_user, AssignmentStatus.ACCEPTED.value)
         db.commit()
 
-        result = flag_no_shows(db)
+        result = flag_no_shows(db, now=_business_time(11))
 
         assert result["flagged_no_shows"] == 0
 
@@ -216,7 +233,7 @@ class TestFlagNoShows:
         _make_assignment(db, req, wp, admin_user, AssignmentStatus.ACCEPTED.value)
         db.commit()
 
-        result = flag_no_shows(db)
+        result = flag_no_shows(db, now=_business_time(11))
 
         assert result["flagged_no_shows"] == 0
 
@@ -231,7 +248,7 @@ class TestFlagNoShows:
         _make_assignment(db, req, wp, admin_user, AssignmentStatus.ACCEPTED.value)
         db.commit()
 
-        result = flag_no_shows(db)
+        result = flag_no_shows(db, now=_business_time(11))
 
         assert result["flagged_no_shows"] == 0
 
@@ -243,16 +260,143 @@ class TestFlagNoShows:
         asgn = _make_assignment(db, req, wp, admin_user, AssignmentStatus.ACCEPTED.value)
         db.commit()
 
-        flag_no_shows(db)
-        result2 = flag_no_shows(db)
+        flag_no_shows(db, now=_business_time(11))
+        result2 = flag_no_shows(db, now=_business_time(11))
 
         assert result2["flagged_no_shows"] == 0  # already existed, not duplicated
 
-        from sqlalchemy import select, func
         count = db.execute(
             select(func.count(Attendance.id)).where(Attendance.assignment_id == asgn.id)
         ).scalar_one()
         assert count == 1
+
+    @patch("app.core.scheduler.send_push_to_user")
+    def test_early_morning_deploy_does_not_flag_workers(
+        self, mock_push, db, client_user, client_profile, admin_user
+    ):
+        _, wp = _make_worker(db, "9200000018", "noshow-w8@test.com")
+        req = _make_requirement(
+            db,
+            client_profile,
+            client_user,
+            RequirementStatus.IN_PROGRESS.value,
+            shift_details="Day 09:00-18:00",
+        )
+        _make_assignment(db, req, wp, admin_user, AssignmentStatus.ACTIVE.value)
+        db.commit()
+
+        result = flag_no_shows(db, now=_business_time(6))
+
+        assert result["flagged_no_shows"] == 0
+        mock_push.assert_not_called()
+
+    @patch("app.core.scheduler.send_push_to_user")
+    def test_worker_is_not_flagged_until_grace_period_expires(
+        self, mock_push, db, client_user, client_profile, admin_user
+    ):
+        _, wp = _make_worker(db, "9200000019", "noshow-w9@test.com")
+        req = _make_requirement(db, client_profile, client_user, RequirementStatus.IN_PROGRESS.value)
+        _make_assignment(db, req, wp, admin_user, AssignmentStatus.ACCEPTED.value)
+        db.commit()
+
+        before_grace = flag_no_shows(db, now=_business_time(9, 59))
+        after_grace = flag_no_shows(db, now=_business_time(10))
+
+        assert before_grace["flagged_no_shows"] == 0
+        assert after_grace["flagged_no_shows"] == 1
+        assert mock_push.call_count >= 1
+
+    @patch("app.core.scheduler.send_push_to_user")
+    def test_configurable_grace_period_is_enforced(
+        self, mock_push, db, client_user, client_profile, admin_user, monkeypatch
+    ):
+        monkeypatch.setattr(settings, "no_show_grace_period_minutes", 120)
+        _, wp = _make_worker(db, "9200000020", "noshow-w10@test.com")
+        req = _make_requirement(db, client_profile, client_user, RequirementStatus.IN_PROGRESS.value)
+        _make_assignment(db, req, wp, admin_user, AssignmentStatus.ACTIVE.value)
+        db.commit()
+
+        result = flag_no_shows(db, now=_business_time(10, 30))
+
+        assert result["flagged_no_shows"] == 0
+        mock_push.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "terminal_status",
+        [AssignmentStatus.CANCELLED.value, AssignmentStatus.REPLACED.value],
+    )
+    @patch("app.core.scheduler.send_push_to_user")
+    def test_cancelled_and_replaced_assignments_are_ignored(
+        self,
+        mock_push,
+        terminal_status,
+        db,
+        client_user,
+        client_profile,
+        admin_user,
+    ):
+        phone_suffix = "21" if terminal_status == AssignmentStatus.CANCELLED.value else "22"
+        _, wp = _make_worker(
+            db,
+            f"92000000{phone_suffix}",
+            f"noshow-terminal-{terminal_status}@test.com",
+        )
+        req = _make_requirement(db, client_profile, client_user, RequirementStatus.IN_PROGRESS.value)
+        _make_assignment(db, req, wp, admin_user, terminal_status)
+        db.commit()
+
+        result = flag_no_shows(db, now=_business_time(11))
+
+        assert result["flagged_no_shows"] == 0
+        mock_push.assert_not_called()
+
+    @patch("app.core.scheduler.send_push_to_user")
+    def test_missing_shift_start_fails_safe(
+        self, mock_push, db, client_user, client_profile, admin_user
+    ):
+        _, wp = _make_worker(db, "9200000023", "noshow-w23@test.com")
+        req = _make_requirement(
+            db,
+            client_profile,
+            client_user,
+            RequirementStatus.IN_PROGRESS.value,
+            shift_details="Day shift",
+        )
+        _make_assignment(db, req, wp, admin_user, AssignmentStatus.ACTIVE.value)
+        db.commit()
+
+        result = flag_no_shows(db, now=_business_time(11))
+
+        assert result["flagged_no_shows"] == 0
+        mock_push.assert_not_called()
+
+    def test_database_rejects_duplicate_assignment_date(
+        self, db, client_user, client_profile, admin_user
+    ):
+        _, wp = _make_worker(db, "9200000024", "noshow-w24@test.com")
+        req = _make_requirement(db, client_profile, client_user, RequirementStatus.IN_PROGRESS.value)
+        asgn = _make_assignment(db, req, wp, admin_user, AssignmentStatus.ACTIVE.value)
+        db.commit()
+
+        first = Attendance(
+            assignment_id=asgn.id,
+            worker_profile_id=wp.id,
+            attendance_date=business_date(),
+            status=AttendanceStatus.PRESENT.value,
+        )
+        db.add(first)
+        db.commit()
+
+        duplicate = Attendance(
+            assignment_id=asgn.id,
+            worker_profile_id=wp.id,
+            attendance_date=business_date(),
+            status=AttendanceStatus.NO_SHOW.value,
+        )
+        db.add(duplicate)
+        with pytest.raises(IntegrityError):
+            db.flush()
+        db.rollback()
 
 
 class TestAdminMarkNoShowAsExcused:
@@ -270,7 +414,7 @@ class TestAdminMarkNoShowAsExcused:
         no_show = Attendance(
             assignment_id=asgn.id,
             worker_profile_id=wp.id,
-            attendance_date=date.today(),
+            attendance_date=business_date(),
             status=AttendanceStatus.NO_SHOW.value,
             notes="Auto-flagged: no check-in recorded",
         )

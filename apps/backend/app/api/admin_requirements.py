@@ -34,7 +34,7 @@ from app.services.quote_service import build_quote_entity
 from app.services.payment_ledger_service import calculate_quote_total
 from app.utils.audit import audit_event
 from app.utils.pagination import PaginationParams, paginate, pagination_meta
-from app.utils.time import business_today
+from app.utils.time import business_date
 from app.utils.response import success_response
 
 router = APIRouter(prefix="/admin/requirements", tags=["Admin Requirements"])
@@ -595,7 +595,7 @@ def request_extension(
         quote_type="extension",
         extension_days=payload.additional_days,
         status=QuoteStatus.SENT.value,
-        valid_until=business_today() + timedelta(days=7),
+        valid_until=business_date() + timedelta(days=7),
         created_by_user_id=current_user.id,
     )
     create_quote(db, extension_quote)

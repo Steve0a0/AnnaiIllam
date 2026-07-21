@@ -182,8 +182,12 @@ Four core-flow bugs fixed as part of a structured audit. 111 backend tests pass 
 - Admin ESLint passes with 0 errors; 8 warnings remain non-blocking.
 - Admin tests pass 25/25 and the Next.js production build completes.
 - Mobile TypeScript passes and mobile tests pass 11/11.
-- Backend dependency audit passes with no known vulnerabilities after upgrading the coupled FastAPI/Starlette and pytest/pytest-asyncio dependency sets; the full backend suite passes 782/782 tests.
+- Backend dependency audit passes with no known vulnerabilities after upgrading the coupled FastAPI/Starlette and pytest/pytest-asyncio dependency sets; the full backend suite passes 802/802 tests.
 - FastAPI 0.139 uses lazy included routers. Router-wide security tests must inspect each included router's `effective_route_contexts()` as well as direct `APIRoute` entries.
+- Scheduled jobs run only through `python -m app.scheduler_runner`; API startup has no scheduler hooks. Deploy exactly one scheduler replica independently of API `WEB_CONCURRENCY`.
+- No-show flagging parses the first `HH:MM` from assignment/requirement shift text, waits `NO_SHOW_GRACE_PERIOD_MINUTES` (default 60), and fails safe when no start time is parseable. Attendance is unique by assignment and business date; migration `b7e1c42d9a60` repairs drifted databases.
+- `app.utils.time.business_date(at=None)` is the single Asia/Kolkata calendar-date helper. Naive inputs are treated as stored UTC; attendance check-ins retain UTC timestamps but derive `attendance_date` in IST, which payroll aggregates.
+- Razorpay mobile callbacks and `payment.captured` webhooks reconcile through `payment_reconciliation_service.py` under row locks. Captured status, INR, exact paise amount, order ID, and globally unique payment ID are enforced; the synthetic webhook is local-only.
 - Admin build fixes include a stable React Query timestamp for requirement age,
   local `useQueryClient()` initialization in `WorkerReviewPanel`, and
   `worker_daily_rate` in `CreateQuotePayload`.

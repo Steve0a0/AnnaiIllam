@@ -1,11 +1,11 @@
 import redis as redis_lib
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from starlette import status
-from fastapi.responses import JSONResponse
+
 from app.core.config import settings
-from app.core.scheduler import get_scheduler_status
 from app.db.session import engine
 from app.utils.response import error_response, success_response
 
@@ -34,17 +34,10 @@ def readiness():
     except Exception:
         errors.append("redis")
 
-    scheduler = get_scheduler_status()
-    if not scheduler["alive"]:
-        errors.append("scheduler")
-
     if errors:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content=error_response(f"Dependencies not ready: {', '.join(errors)}"),
         )
 
-    return success_response(
-        "API, database, Redis, and scheduler are ready",
-        data={"scheduler": scheduler},
-    )
+    return success_response("API, database, and Redis are ready")

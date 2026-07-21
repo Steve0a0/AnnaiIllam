@@ -37,8 +37,9 @@ quote and current ledger. They never use those client hints to set a charge.
 
 New overpayments are rejected. Existing overpaid legacy data remains visible as
 **overpaid_amount** for Finance to reconcile. Gateway order/payment IDs are
-unique, verification callbacks are idempotent, and a matching pending intent is
-reused. Concurrent transaction locking is separately tracked by PROD-006.
+unique, and a matching pending intent is reused. Mobile callbacks and Razorpay
+webhooks converge on one row-locked reconciliation service that validates the
+captured status, exact paise amount, and INR currency before marking paid.
 
 ## Lifecycle decision
 

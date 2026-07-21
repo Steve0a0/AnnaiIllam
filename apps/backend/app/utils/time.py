@@ -23,17 +23,14 @@ def business_now() -> datetime:
     return datetime.now(IST)
 
 
-def business_today() -> date:
-    """Current business date (IST).
+def business_date(at: datetime | None = None) -> date:
+    """Return the Asia/Kolkata calendar date for a UTC timestamp.
 
-    Use this instead of ``date.today()`` or ``utcnow().date()`` for any
-    business-day decision so the day does not flip at UTC midnight.
+    With no argument, returns the current business date. Naive timestamps are
+    treated as UTC because application DateTime columns store naive UTC.
     """
-    return business_now().date()
-
-
-def to_business_date(dt: datetime) -> date:
-    """Convert a UTC timestamp (naive treated as UTC) to its IST calendar date."""
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(IST).date()
+    if at is None:
+        return business_now().date()
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    return at.astimezone(IST).date()

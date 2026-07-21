@@ -6,9 +6,8 @@
 # The admin (Next.js) and mobile (Expo) run natively — do NOT dockerize them
 # for dev (slow hot-reload on Windows; Expo is a native toolchain).
 #
-# Why a separate `scheduler` service: the API runs with RUN_SCHEDULER=false, so
-# no matter how many API workers start, exactly ONE process runs scheduled jobs
-# (no duplicate no-show rows, no double notifications).
+# Why a separate `scheduler` service: API processes contain no scheduler
+# startup hook, while exactly ONE dedicated process runs scheduled jobs.
 
 x-backend: &backend
   build:
@@ -85,9 +84,6 @@ services:
   backend:
     <<: *backend
     command: sh -c "uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY:-2} --no-access-log"
-    environment:
-      <<: *backend-env
-      RUN_SCHEDULER: "false"   # API never runs the scheduler — the scheduler service does
     ports:
       - "8000:8000"
     depends_on:
@@ -106,6 +102,8 @@ services:
   scheduler:
     <<: *backend
     command: python -m app.scheduler_runner
+    deploy:
+      replicas: 1
     depends_on:
       db:
         condition: service_healthy

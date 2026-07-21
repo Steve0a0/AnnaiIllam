@@ -74,9 +74,14 @@ def build_manual_client_payment(
     )
 
 
-def mark_gateway_payment_success(payment, gateway_payment_id: str, gateway_signature: str) -> None:
+def mark_gateway_payment_success(
+    payment,
+    gateway_payment_id: str,
+    gateway_signature: str | None,
+) -> None:
     payment.gateway_payment_id = gateway_payment_id
-    payment.gateway_signature = gateway_signature
+    if gateway_signature:
+        payment.gateway_signature = gateway_signature
     payment.payment_status = ClientPaymentStatus.PAID.value
     payment.paid_at = utcnow()
 

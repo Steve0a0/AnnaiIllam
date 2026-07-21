@@ -39,6 +39,30 @@ def get_client_payment_by_gateway_order_id(db: Session, gateway_order_id: str) -
     return db.execute(stmt).scalar_one_or_none()
 
 
+def get_client_payment_by_gateway_order_id_for_update(
+    db: Session,
+    gateway_order_id: str,
+) -> ClientPayment | None:
+    stmt = (
+        select(ClientPayment)
+        .where(ClientPayment.gateway_order_id == gateway_order_id)
+        .with_for_update()
+    )
+    return db.execute(stmt).scalar_one_or_none()
+
+
+def get_client_payment_by_gateway_payment_id_for_update(
+    db: Session,
+    gateway_payment_id: str,
+) -> ClientPayment | None:
+    stmt = (
+        select(ClientPayment)
+        .where(ClientPayment.gateway_payment_id == gateway_payment_id)
+        .with_for_update()
+    )
+    return db.execute(stmt).scalar_one_or_none()
+
+
 def create_worker_payout(db: Session, payout: WorkerPayout) -> WorkerPayout:
     db.add(payout)
     db.flush()

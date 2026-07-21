@@ -1,5 +1,5 @@
 ﻿from datetime import timedelta
-from app.utils.time import utcnow
+from app.utils.time import business_date, utcnow
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select, func
@@ -81,7 +81,7 @@ def get_dashboard_alerts(
     db: Session = Depends(get_db),
 ):
     now = utcnow()
-    today = now.date()
+    today = business_date(now)
     complaints = get_all_complaints(db)
     sla_policy_map = get_sla_policy_map(db)
     active_assignments = get_active_assignments(db)

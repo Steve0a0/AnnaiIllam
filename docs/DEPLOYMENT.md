@@ -17,6 +17,7 @@ Recommended production layout:
 | Component | Production target | Notes |
 |---|---|---|
 | Backend API | Docker container on VM, ECS, Render, Fly, Railway, or equivalent | Exposes port `8000` internally |
+| Scheduler | One backend-image container/process | Run `python -m app.scheduler_runner` with exactly one replica |
 | Admin dashboard | Docker container or managed Next.js host | Exposes port `3000` internally |
 | PostgreSQL | Managed PostgreSQL 16 | Required by backend |
 | Redis | Managed Redis | Required for rate limiting/readiness |
@@ -85,6 +86,7 @@ Do not commit production values. Store them in the platform secret manager.
 | `SENTRY_TRACES_SAMPLE_RATE` | No | Start with `0.05` |
 | `SENTRY_PROFILES_SAMPLE_RATE` | No | Start with `0.0` |
 | `WEB_CONCURRENCY` | No | Start with `2`, tune after load testing |
+| `NO_SHOW_GRACE_PERIOD_MINUTES` | No | Default `60`; delay after parsed shift start before an absence is created |
 | `BACKUP_S3_BUCKET` | Yes | Bucket for database dumps; may be separate from document bucket |
 | `BACKUP_S3_PREFIX` | No | Default: `postgres` |
 | `BACKUP_S3_REGION` | No | Defaults to `S3_REGION` or `ap-south-1` |
@@ -313,7 +315,7 @@ The seed command is idempotent for admin users. Rotate the password after first 
 
 ## 8. Deploy With Docker Compose On A Single VM
 
-This is the simplest production shape for an MVP VM. Managed PostgreSQL, Redis, and S3 are still recommended; do not run production database state inside this compose file unless there is a separate backup plan.
+This is the simplest production shape for an MVP VM. Managed PostgreSQL, Redis, and S3 are still recommended; do not run production database state inside this compose file unless there is a separate backup plan. API workers never run scheduled jobs, so deploy one separate scheduler service and do not scale it above one replica.
 
 Example `/opt/annai/docker-compose.prod.yml`:
 
@@ -326,6 +328,15 @@ services:
       - /etc/annai/backend.env
     ports:
       - "127.0.0.1:8000:8000"
+
+  scheduler:
+    image: registry.example.com/annai-backend:<release>
+    restart: unless-stopped
+    env_file:
+      - /etc/annai/backend.env
+    command: python -m app.scheduler_runner
+    deploy:
+      replicas: 1
 
   admin:
     image: registry.example.com/annai-admin:<release>
@@ -348,6 +359,7 @@ Review logs:
 
 ```bash
 docker compose -f /opt/annai/docker-compose.prod.yml logs -f backend
+docker compose -f /opt/annai/docker-compose.prod.yml logs -f scheduler
 docker compose -f /opt/annai/docker-compose.prod.yml logs -f admin
 ```
 
@@ -367,6 +379,27 @@ Wants=network-online.target
 WorkingDirectory=/opt/annai-illam-platform/apps/backend
 EnvironmentFile=/etc/annai/backend.env
 ExecStart=/opt/annai-illam-platform/apps/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 2 --no-access-log
+Restart=always
+RestartSec=5
+User=annai
+Group=annai
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Scheduler service example: `/etc/systemd/system/annai-scheduler.service`. Enable exactly one instance of this unit; never use a templated or multi-instance unit for the scheduler.
+
+```ini
+[Unit]
+Description=Annai Illam Standalone Scheduler
+After=network-online.target annai-backend.service
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/annai-illam-platform/apps/backend
+EnvironmentFile=/etc/annai/backend.env
+ExecStart=/opt/annai-illam-platform/apps/backend/venv/bin/python -m app.scheduler_runner
 Restart=always
 RestartSec=5
 User=annai
@@ -402,8 +435,10 @@ Enable services:
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now annai-backend
+sudo systemctl enable --now annai-scheduler
 sudo systemctl enable --now annai-admin
 sudo systemctl status annai-backend
+sudo systemctl status annai-scheduler
 sudo systemctl status annai-admin
 ```
 
@@ -482,6 +517,7 @@ Expected:
 
 - `/health` returns 200
 - `/ready` returns 200 only when database and Redis are reachable
+- Exactly one scheduler container/process is running and its logs contain `Standalone scheduler process starting`
 - `python -m scripts.check_redis` passes from the backend runtime with the production `REDIS_URL`
 
 ### Admin
@@ -742,6 +778,7 @@ curl -fsS https://api-staging.annaiillam.example/api/v1/ready
 Daily:
 
 - `/api/v1/ready` is healthy
+- Exactly one standalone scheduler process is healthy; investigate scheduler restarts or failed-cleanup logs
 - Sentry has no unresolved production spikes
 - Redis memory usage, evictions, and connection count are stable
 - PostgreSQL storage and connections are below alert thresholds

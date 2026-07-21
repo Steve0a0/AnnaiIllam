@@ -1,10 +1,44 @@
 import os
 
-# Must be set before any app imports so Settings() picks up the right database.
-# When TEST_DATABASE_URL is set (e.g. in CI with a real PostgreSQL container),
-# it is used as the test database and also forwarded to DATABASE_URL so the app's
-# Settings() and create_engine() initialise correctly.
+# Choose the test database, in priority order (set before any app import so
+# Settings() / create_engine() pick up the right URL):
+#   1. TEST_DATABASE_URL if explicitly set — CI points this at its Postgres
+#      service; a developer can also force SQLite with TEST_DATABASE_URL=sqlite://.
+#   2. The local Docker Postgres (docker compose) when it's reachable — so local
+#      runs match CI and avoid SQLite-vs-Postgres differences (audit sessions,
+#      SELECT FOR UPDATE, partial indexes). The test DB is auto-created if absent.
+#   3. In-memory SQLite fallback when no Postgres is available (fast, zero-setup).
+_DOCKER_PG = "postgresql+psycopg://postgres:postgres@localhost:5433/annai_illam_test"
+
+
+def _ensure_postgres(url: str) -> bool:
+    """True if the Postgres server is reachable; creates the test DB if missing."""
+    try:
+        import psycopg
+    except ImportError:
+        return False
+    raw = url.replace("+psycopg", "")
+    base, _, db_name = raw.rpartition("/")
+    try:
+        conn = psycopg.connect(f"{base}/postgres", connect_timeout=2)
+    except Exception:
+        return False  # server not up → caller falls back to SQLite
+    try:
+        conn.autocommit = True
+        exists = conn.execute(
+            "SELECT 1 FROM pg_database WHERE datname = %s", (db_name,)
+        ).fetchone()
+        if not exists:
+            conn.execute(f'CREATE DATABASE "{db_name}"')
+    finally:
+        conn.close()
+    return True
+
+
 _TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
+if not _TEST_DB_URL and _ensure_postgres(_DOCKER_PG):
+    _TEST_DB_URL = _DOCKER_PG
+
 _USE_POSTGRES = bool(_TEST_DB_URL and not _TEST_DB_URL.startswith("sqlite"))
 
 if _USE_POSTGRES:

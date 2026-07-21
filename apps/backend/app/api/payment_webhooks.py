@@ -13,6 +13,12 @@ from app.repositories.payment_repository import get_client_payment_by_gateway_or
 from app.schemas.payment import PaymentWebhookSchema
 from app.services import razorpay_service
 from app.services.payment_service import mark_gateway_payment_success
+from app.services.payment_reconciliation_service import (
+    GatewayPaymentConflictError,
+    InvalidCapturedPaymentError,
+    PaymentOrderNotFoundError,
+    reconcile_captured_gateway_payment,
+)
 from app.services.webhook_security import verify_webhook_signature
 from app.utils.audit import audit_event
 from app.utils.response import success_response
@@ -26,6 +32,12 @@ async def payment_webhook(
     request: Request,
     db: Session = Depends(get_db),
 ):
+    # Legacy synthetic payload retained only for local regression tests. Real
+    # environments must use /webhook/razorpay so captured status, amount, and
+    # currency come from Razorpay's signed payment entity.
+    if settings.app_env != "local":
+        raise HTTPException(status_code=404, detail="Not found")
+
     client_host = request.client.host if request.client else "unknown"
     check_rate_limit(f"payment_webhook_ip:{client_host}", limit=60, window_seconds=60)
 
@@ -166,17 +178,67 @@ async def razorpay_webhook(
         )
         return success_response("Payment already recorded", {"payment_id": payment.id})
 
-    mark_gateway_payment_success(
-        payment=payment,
-        gateway_payment_id=razorpay_payment_id,
-        gateway_signature=signature,
-    )
+    try:
+        result = reconcile_captured_gateway_payment(
+            db,
+            gateway_order_id=razorpay_order_id,
+            gateway_payment_id=razorpay_payment_id,
+            amount_paise=payment_entity.get("amount"),
+            currency=payment_entity.get("currency"),
+            status=payment_entity.get("status"),
+            captured=payment_entity.get("captured"),
+        )
+    except PaymentOrderNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (InvalidCapturedPaymentError, GatewayPaymentConflictError) as exc:
+        db.rollback()
+        event_id = request.headers.get("x-razorpay-event-id")
+        security_logger.error(
+            "Razorpay capture not reconciled | event_id=%s order_id=%s payment_id=%s reason=%s",
+            event_id,
+            razorpay_order_id,
+            razorpay_payment_id,
+            exc,
+        )
+        audit_event(
+            "razorpay_payment_capture_not_reconciled",
+            {
+                "event_id": event_id,
+                "razorpay_order_id": razorpay_order_id,
+                "razorpay_payment_id": razorpay_payment_id,
+                "reason": str(exc),
+            },
+        )
+        return success_response(
+            "Webhook acknowledged without changing the ledger",
+            {"payment_id": payment.id, "status": payment.payment_status},
+        )
+
     db.commit()
+
+    if not result.changed:
+        audit_event(
+            "razorpay_webhook_duplicate_ignored",
+            {
+                "event_id": request.headers.get("x-razorpay-event-id"),
+                "payment_id": result.payment.id,
+                "razorpay_order_id": razorpay_order_id,
+                "razorpay_payment_id": razorpay_payment_id,
+            },
+        )
+        return success_response(
+            "Payment already recorded",
+            {
+                "payment_id": result.payment.id,
+                "status": result.payment.payment_status,
+            },
+        )
 
     audit_event(
         "razorpay_payment_captured",
         {
-            "payment_id": payment.id,
+            "event_id": request.headers.get("x-razorpay-event-id"),
+            "payment_id": result.payment.id,
             "razorpay_order_id": razorpay_order_id,
             "razorpay_payment_id": razorpay_payment_id,
             "amount": payment.amount,
@@ -185,5 +247,8 @@ async def razorpay_webhook(
 
     return success_response(
         "Payment captured successfully",
-        {"payment_id": payment.id, "status": payment.payment_status},
+        {
+            "payment_id": result.payment.id,
+            "status": result.payment.payment_status,
+        },
     )

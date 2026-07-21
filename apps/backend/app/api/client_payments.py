@@ -1,5 +1,6 @@
 import logging
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
@@ -21,10 +22,19 @@ from app.repositories.requirement_repository import get_requirement_by_id
 from app.repositories.quote_repository import get_quote_by_requirement_id
 from app.schemas.payment import CreateClientPaymentOrderSchema, VerifyRazorpayPaymentSchema, SubmitReferencePaymentSchema
 from app.services.notification_service import queue_notification
-from app.services.payment_service import build_client_gateway_payment, build_reference_client_payment, mark_gateway_payment_success
+from app.services.payment_service import (
+    build_client_gateway_payment,
+    build_reference_client_payment,
+)
 from app.services.payment_ledger_service import (
     PaymentLedgerError,
     derive_client_payment_intent,
+)
+from app.services.payment_reconciliation_service import (
+    GatewayPaymentConflictError,
+    InvalidCapturedPaymentError,
+    PaymentOrderNotFoundError,
+    reconcile_captured_gateway_payment,
 )
 from app.services import razorpay_service
 from app.utils.audit import audit_event
@@ -494,6 +504,74 @@ def submit_reference_payment(
     )
 
 
+def _reconcile_checkout_callback(
+    db: Session,
+    payment,
+    payload: VerifyRazorpayPaymentSchema,
+):
+    if payment.gateway_payment_id:
+        return reconcile_captured_gateway_payment(
+            db,
+            gateway_order_id=payment.gateway_order_id,
+            gateway_payment_id=payload.razorpay_payment_id,
+            amount_paise=payment.amount * 100,
+            currency="INR",
+            status="captured",
+            captured=True,
+            checkout_signature=payload.razorpay_signature,
+        )
+
+    try:
+        gateway_payment = razorpay_service.fetch_payment(
+            payload.razorpay_payment_id
+        )
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.exception(
+            "Unable to fetch Razorpay payment %s",
+            payload.razorpay_payment_id,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to confirm captured payment with gateway",
+        ) from exc
+
+    if not isinstance(gateway_payment, dict):
+        raise HTTPException(
+            status_code=502,
+            detail="Payment gateway returned an invalid response",
+        )
+    if gateway_payment.get("id") != payload.razorpay_payment_id:
+        raise HTTPException(status_code=409, detail="Gateway payment identity mismatch")
+    if gateway_payment.get("order_id") != payment.gateway_order_id:
+        raise HTTPException(status_code=409, detail="Gateway order identity mismatch")
+
+    return reconcile_captured_gateway_payment(
+        db,
+        gateway_order_id=payment.gateway_order_id,
+        gateway_payment_id=payload.razorpay_payment_id,
+        amount_paise=gateway_payment.get("amount"),
+        currency=gateway_payment.get("currency"),
+        status=gateway_payment.get("status"),
+        captured=gateway_payment.get("captured"),
+        checkout_signature=payload.razorpay_signature,
+    )
+
+
+def _reconcile_checkout_callback_or_http(
+    db: Session,
+    payment,
+    payload: VerifyRazorpayPaymentSchema,
+):
+    try:
+        return _reconcile_checkout_callback(db, payment, payload)
+    except PaymentOrderNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidCapturedPaymentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except GatewayPaymentConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/verify")
 def verify_razorpay_payment(
     payload: VerifyRazorpayPaymentSchema,
@@ -507,15 +585,6 @@ def verify_razorpay_payment(
     The three fields (``razorpay_order_id``, ``razorpay_payment_id``,
     ``razorpay_signature``) are passed verbatim from the SDK callback.
     """
-    if not razorpay_service.verify_payment_signature(
-        payload.razorpay_order_id,
-        payload.razorpay_payment_id,
-        payload.razorpay_signature,
-    ):
-        raise HTTPException(status_code=400, detail="Invalid payment signature")
-
-    # Look up the payment by gateway_order_id so we only mark payments that
-    # belong to the authenticated client.
     client_profile = get_client_profile_by_user_id(db, current_user.id)
     if not client_profile:
         raise HTTPException(status_code=404, detail="Client profile not found")
@@ -524,19 +593,33 @@ def verify_razorpay_payment(
     if not payment or payment.client_id != client_profile.id:
         raise HTTPException(status_code=404, detail="Payment not found")
 
-    if payment.payment_status == ClientPaymentStatus.PAID.value:
+    if not razorpay_service.verify_payment_signature(
+        payment.gateway_order_id,
+        payload.razorpay_payment_id,
+        payload.razorpay_signature,
+    ):
+        raise HTTPException(status_code=400, detail="Invalid payment signature")
+
+    if (
+        payment.payment_status == ClientPaymentStatus.PAID.value
+        and payment.gateway_payment_id == payload.razorpay_payment_id
+        and payment.gateway_signature
+    ):
         # Idempotent — already processed (e.g. also captured via webhook)
         return success_response("Payment already verified", {"payment_id": payment.id})
 
-    mark_gateway_payment_success(
-        payment,
-        gateway_payment_id=payload.razorpay_payment_id,
-        gateway_signature=payload.razorpay_signature,
-    )
+    result = _reconcile_checkout_callback_or_http(db, payment, payload)
+    payment = result.payment
 
     requirement = get_requirement_by_id(db, payment.requirement_id)
 
     db.commit()
+
+    if not result.changed:
+        return success_response(
+            "Payment already verified",
+            {"payment_id": payment.id, "status": payment.payment_status},
+        )
 
     # Send invoice email in background
     try:

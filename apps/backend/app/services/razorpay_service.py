@@ -19,6 +19,7 @@ Environment variables required (staging/production):
 import hashlib
 import hmac
 import logging
+from urllib.parse import quote
 
 import httpx
 
@@ -60,6 +61,18 @@ def create_order(amount_rupees: int, receipt: str, notes: dict | None = None) ->
     order = response.json()
     logger.info("Razorpay order created | order_id=%s receipt=%s", order.get("id"), receipt)
     return order
+
+
+def fetch_payment(razorpay_payment_id: str) -> dict:
+    """Fetch authoritative payment facts used by the checkout callback."""
+    payment_id = quote(razorpay_payment_id, safe="")
+    response = httpx.get(
+        f"{_RAZORPAY_API_BASE}/payments/{payment_id}",
+        auth=(settings.razorpay_key_id, settings.razorpay_key_secret),
+        timeout=_REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 def verify_payment_signature(

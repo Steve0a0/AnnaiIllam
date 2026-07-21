@@ -1,5 +1,3 @@
-from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -51,25 +49,10 @@ from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, log_requests
 from app.core.monitoring import init_sentry
-from app.core.scheduler import start_scheduler, stop_scheduler
 from app.core.security_headers import security_headers_middleware
 
 init_sentry()
 configure_logging(settings.is_local)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Run the scheduler only when explicitly enabled AND not on SQLite (tests
-    # bind to a separate in-memory DB and would hit "no such table" errors).
-    # In Docker the scheduler runs as its own container (RUN_SCHEDULER=false on
-    # the API), so API workers never double-run scheduled jobs.
-    scheduler_enabled = settings.run_scheduler and not settings.database_url.startswith("sqlite")
-    if scheduler_enabled:
-        start_scheduler()
-    yield
-    if scheduler_enabled:
-        stop_scheduler()
 
 
 app = FastAPI(
@@ -78,7 +61,6 @@ app = FastAPI(
     docs_url="/docs" if settings.is_local else None,
     redoc_url="/redoc" if settings.is_local else None,
     openapi_url="/openapi.json" if settings.is_local else None,
-    lifespan=lifespan,
 )
 
 app.add_middleware(
