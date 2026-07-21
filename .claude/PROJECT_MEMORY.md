@@ -59,6 +59,7 @@
 - Worker onboarding is multi-stage: phone OTP → consent → ID/selfie S3 upload → build profile → under review (admin approves) → biometric setup → app.
 - Worker HomeScreen is the core operational screen: hero job card (accept/decline, GPS check-in/out), week strip calendar, availability toggle, browse jobs button.
 - GPS check-in/out uses `expo-location`. File uploads use presigned S3/R2 URLs with local multipart fallback; onboarding/E2E tests redirect fallback files to pytest `tmp_path`, and `apps/backend/uploads/` is ignored.
+- Local KYC fallback paths are restricted to generated worker-document keys and checked with `realpath` against the upload root before filesystem access; traversal coverage is in `tests/test_worker_onboarding.py`.
 - **Known gap: No complaints screens exist in mobile for either client or worker.** FIXED 2026-05-08 — see below.
 
 ## Mobile Complaints / Issues (built 2026-05-08)

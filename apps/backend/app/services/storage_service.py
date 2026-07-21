@@ -6,17 +6,37 @@ development uses the backend filesystem so worker identity documents can be
 reviewed from the admin dashboard without any paid storage service.
 """
 
+import os
 from pathlib import Path
 import re
 import uuid
 
 from app.core.config import settings
 from app.core.file_upload_constants import (
+    ALLOWED_DOCUMENT_EXTENSIONS,
+    ALLOWED_DOCUMENT_TYPES,
+    DOCUMENT_MIME_TYPES,
     MAGIC_BYTES_READ_LENGTH,
     MIME_TYPE_EXTENSIONS,
     detect_content_type,
     normalize_content_type,
     validate_upload_declaration,
+)
+
+
+_LOCAL_DOCUMENT_TYPE_PATTERN = '|'.join(
+    re.escape(value) for value in sorted(ALLOWED_DOCUMENT_TYPES)
+)
+_LOCAL_DOCUMENT_EXTENSION_PATTERN = '|'.join(
+    re.escape(value.removeprefix('.'))
+    for value in sorted(ALLOWED_DOCUMENT_EXTENSIONS)
+)
+_LOCAL_DOCUMENT_KEY_PATTERN = re.compile(
+    rf'\Aworker-documents/'
+    rf'(?P<user_id>[1-9][0-9]*)/'
+    rf'(?P<document_type>{_LOCAL_DOCUMENT_TYPE_PATTERN})/'
+    rf'(?P<object_id>[0-9a-f]{{32}})\.'
+    rf'(?P<extension>{_LOCAL_DOCUMENT_EXTENSION_PATTERN})\Z'
 )
 
 
@@ -250,8 +270,22 @@ def resolve_local_document_path(local_key_or_url: str) -> Path:
     if key.startswith("local:"):
         key = key.removeprefix("local:")
 
-    path = (get_local_upload_root() / key).resolve()
-    root = get_local_upload_root()
-    if root != path and root not in path.parents:
-        raise ValueError("Invalid local document path")
-    return path
+    match = _LOCAL_DOCUMENT_KEY_PATTERN.fullmatch(key)
+    if match is None:
+        raise DocumentUploadValidationError('Invalid local document path')
+
+    document_type = match.group('document_type')
+    extension = match.group('extension')
+    allowed_extensions = {
+        MIME_TYPE_EXTENSIONS[mime_type]
+        for mime_type in DOCUMENT_MIME_TYPES[document_type]
+    }
+    if extension not in allowed_extensions:
+        raise DocumentUploadValidationError('Invalid local document path')
+
+    root = os.path.realpath(os.fspath(get_local_upload_root()))
+    path = os.path.realpath(os.path.join(root, key))
+    safe_prefix = root + os.sep
+    if not path.startswith(safe_prefix):
+        raise DocumentUploadValidationError('Invalid local document path')
+    return Path(path)

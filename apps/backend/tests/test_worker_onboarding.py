@@ -32,6 +32,10 @@ import pytest
 from app.core.file_upload_constants import SELFIE_MAX_SIZE_BYTES
 from app.models.worker_document import WorkerDocument
 from app.models.worker_profile import WorkerProfile
+from app.services.storage_service import (
+    DocumentUploadValidationError,
+    resolve_local_document_path,
+)
 from app.services.token_service import build_token_pair
 
 BASE = "/api/v1"
@@ -284,6 +288,69 @@ class TestSubmitIdentity:
 # ANNAI-9 — KYC upload validation: bad objects rejected before activation
 # ---------------------------------------------------------------------------
 
+class TestLocalDocumentPathSecurity:
+    def test_generated_key_resolves_inside_temporary_upload_root(self, worker_user):
+        object_id = 'a' * 32
+        key = (
+            f'local:worker-documents/{worker_user.id}/'
+            f'govt_id/{object_id}.jpg'
+        )
+
+        path = resolve_local_document_path(key)
+
+        assert path.parts[-4:] == (
+            'worker-documents',
+            str(worker_user.id),
+            'govt_id',
+            f'{object_id}.jpg',
+        )
+
+    @pytest.mark.parametrize(
+        'unsafe_key',
+        [
+            'local:../../outside.txt',
+            'local:/etc/passwd',
+            'local:C:\\Windows\\win.ini',
+            (
+                'local:worker-documents/1/govt_id/'
+                + ('a' * 32)
+                + '.jpg/../../../../.env'
+            ),
+            'local:worker-documents/1/govt_id/not-a-uuid.jpg',
+            'local:worker-documents/1/selfie/' + ('a' * 32) + '.pdf',
+        ],
+    )
+    def test_untrusted_path_shapes_are_rejected(self, unsafe_key):
+        with pytest.raises(
+            DocumentUploadValidationError,
+            match='Invalid local document path',
+        ):
+            resolve_local_document_path(unsafe_key)
+
+    def test_admin_content_endpoint_rejects_invalid_stored_path(
+        self,
+        client,
+        db,
+        admin_headers,
+        worker_user,
+    ):
+        document = WorkerDocument(
+            user_id=worker_user.id,
+            document_type='govt_id',
+            file_url='local:../../outside.txt',
+            verification_status='pending',
+        )
+        db.add(document)
+        db.commit()
+
+        response = client.get(
+            f'{BASE}/admin/people/worker-documents/{document.id}/content',
+            headers=admin_headers,
+        )
+
+        assert response.status_code == 400
+
+
 class TestIdentityUploadValidation:
     def test_oversized_document_rejected(self, client, worker_headers):
         oversized = _JPEG + b"\x00" * (SELFIE_MAX_SIZE_BYTES + 1)
@@ -318,6 +385,24 @@ class TestIdentityUploadValidation:
         r = client.post(
             f"{BASE}/worker/onboarding/identity",
             json={"govt_id_key": key, "selfie_key": key},
+            headers=worker_headers,
+        )
+        assert r.status_code == 422
+
+    def test_path_traversal_key_rejected(
+        self,
+        client,
+        worker_headers,
+        worker_user,
+    ):
+        key = (
+            f'local:worker-documents/{worker_user.id}/govt_id/'
+            + ('a' * 32)
+            + '.jpg/../../../../.env'
+        )
+        r = client.post(
+            f'{BASE}/worker/onboarding/identity',
+            json={'govt_id_key': key, 'selfie_key': key},
             headers=worker_headers,
         )
         assert r.status_code == 422
