@@ -41,7 +41,7 @@ type Props = {
   route: RouteProp<ClientAuthStackParamList, 'VerifyOtp'>;
 };
 
-export default function VerifyOtpScreen({ route, navigation }: Props) {
+export default function VerifyOtpScreen({ route }: Props) {
   const { phone, devOtp } = route.params;
   const { setAuth } = useAuthStore();
   const inputRef = useRef<TextInput>(null);
@@ -104,9 +104,8 @@ export default function VerifyOtpScreen({ route, navigation }: Props) {
         isProfileComplete: profileComplete,
       });
 
-      if (!profileComplete) {
-        navigation.replace('ProfileSetup');
-      }
+      // RootNavigator now gates the current legal version before either the
+      // profile setup or the authenticated app can be shown.
     } catch (err) {
       Alert.alert('Error', getApiError(err, 'Invalid code. Please try again.'));
     } finally {

@@ -92,6 +92,15 @@ Every protected endpoint checks:
 | View job summary report | ✓ | ✓ | ✗ | ✗ |
 | View worker activity report | ✓ | ✓ | ✗ | ✗ |
 | Export any report | ✓ | ✓ | ✗ | ✗ |
+| **Privacy Requests** | | | | |
+| Request own data export | ✗ | ✗ | ✓ (own only) | ✓ (own only) |
+| Download approved own data export | ✗ | ✗ | ✓ (own only) | ✓ (own only) |
+| Request own account deletion | ✗ | ✗ | ✓ (own only) | ✓ (own only) |
+| View and resolve privacy queue | ✓ | ✗ | ✗ | ✗ |
+| Complete anonymization | ✓ | ✗ | ✗ | ✗ |
+| View published legal documents | ✓ | ✓ | ✓ | ✓ |
+| View own legal acceptance status | ✗ | ✗ | ✓ (own only) | ✓ (own only) |
+| Record own current legal acceptance | ✗ | ✗ | ✓ (own only) | ✓ (own only) |
 | **Settings** | | | | |
 | Manage admin users | ✓ | ✗ | ✗ | ✗ |
 | Change app settings | ✓ | ✗ | ✗ | ✗ |

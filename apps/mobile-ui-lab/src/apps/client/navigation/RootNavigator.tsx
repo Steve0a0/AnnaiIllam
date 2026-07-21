@@ -9,6 +9,7 @@ import type { MobileUser } from '../../../shared/types/auth';
 import type { ClientTabParamList } from './types';
 import AuthNavigator from './AuthNavigator';
 import AppNavigator from './AppNavigator';
+import LegalAcceptanceGate from '../../../shared/screens/LegalAcceptanceGate';
 
 type Props = {
   isDark: boolean;
@@ -51,13 +52,15 @@ export default function RootNavigator({ isDark, onToggleDark }: Props) {
   const isAuthenticated = !!accessToken;
   const showApp = isAuthenticated && isProfileComplete === true;
 
+  if (!isAuthenticated) {
+    return <NavigationContainer><AuthNavigator /></NavigationContainer>;
+  }
+
   return (
-    <NavigationContainer ref={navigationRef}>
-      {showApp ? (
-        <AppNavigator />
-      ) : (
-        <AuthNavigator />
-      )}
-    </NavigationContainer>
+    <LegalAcceptanceGate source="client_mobile">
+      <NavigationContainer ref={navigationRef}>
+        {showApp ? <AppNavigator /> : <AuthNavigator initialRouteName="ProfileSetup" />}
+      </NavigationContainer>
+    </LegalAcceptanceGate>
   );
 }

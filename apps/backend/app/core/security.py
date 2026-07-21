@@ -25,8 +25,15 @@ def generate_numeric_otp(length: int = 6) -> str:
     return "".join(secrets.choice(digits) for _ in range(length))
 
 
-def create_access_token(subject: str, role: str, user_id: int) -> str:
+def create_access_token(
+    subject: str,
+    role: str,
+    user_id: int,
+    *,
+    expires_minutes: int | None = None,
+) -> str:
     now = datetime.now(timezone.utc)
+    ttl_minutes = expires_minutes or settings.access_token_expire_minutes
     payload = {
         "sub": subject,
         "role": role,
@@ -34,7 +41,7 @@ def create_access_token(subject: str, role: str, user_id: int) -> str:
         "type": "access",
         "jti": secrets.token_hex(16),
         "iat": now,
-        "exp": now + timedelta(minutes=settings.access_token_expire_minutes),
+        "exp": now + timedelta(minutes=ttl_minutes),
     }
     return jwt.encode(payload, settings.jwt_secret_key, algorithm="HS256")
 

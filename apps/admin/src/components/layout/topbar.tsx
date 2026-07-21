@@ -15,7 +15,6 @@ import {
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
-import { authStorage } from "@/lib/auth-storage";
 import { useAuthStore } from "@/store/auth-store";
 import { authService } from "@/services/auth.service";
 import { useDashboardAlerts } from "@/features/dashboard/use-dashboard-alerts";
@@ -46,7 +45,7 @@ export default function Topbar() {
   const router = useRouter();
   const user = useAuthStore((state) => state.user);
   const clearAuth = useAuthStore((state) => state.clearAuth);
-  const refreshToken = useAuthStore((state) => state.refreshToken);
+  const csrfToken = useAuthStore((state) => state.csrfToken);
   const { data: alertsResp } = useDashboardAlerts();
   const alerts = alertsResp?.data;
   const totalAlerts =
@@ -75,11 +74,10 @@ export default function Topbar() {
 
   async function handleLogout() {
     try {
-      if (refreshToken) await authService.logout(refreshToken);
+      if (csrfToken) await authService.logout(csrfToken);
     } catch {
       // ignore
     } finally {
-      authStorage.clear();
       clearAuth();
       router.replace("/login");
     }

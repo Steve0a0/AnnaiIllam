@@ -64,6 +64,7 @@ Do not commit production values. Store them in the platform secret manager.
 | `REDIS_URL` | Yes | Managed Redis URL. Use `rediss://default:PASSWORD@HOST:PORT/0` when TLS is enabled |
 | `JWT_SECRET_KEY` | Yes | Strong random secret, at least 32 chars |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | No | `30` |
+| `ADMIN_ACCESS_TOKEN_EXPIRE_MINUTES` | No | `5` (allowed range `1`–`15`) |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | No | `30` |
 | `BACKEND_CORS_ORIGINS` | Yes | `https://admin.annaiillam.example` plus mobile origins if needed |
 | `PAYMENT_WEBHOOK_SECRET` | Yes | Must match Razorpay webhook config |
@@ -113,6 +114,9 @@ openssl rand -hex 32
 | `NODE_ENV` | Yes | `production` |
 | `NEXT_PUBLIC_API_BASE_URL` | Yes | `https://api.annaiillam.example/api/v1` |
 | `NEXT_PUBLIC_APP_ENV` | Yes | `production` |
+| `NEXT_PUBLIC_LEGAL_ENTITY_NAME` | Yes | Registered operator legal name shown on policies |
+| `NEXT_PUBLIC_LEGAL_ENTITY_ADDRESS` | Yes | Registered operator address shown on policies |
+| `NEXT_PUBLIC_GRIEVANCE_EMAIL` | Yes | Monitored grievance officer mailbox |
 | `SENTRY_DSN` | Recommended | Server-side/admin Sentry DSN |
 | `SENTRY_ENVIRONMENT` | Recommended | `production` |
 | `SENTRY_RELEASE` | Recommended | Git SHA or release tag |
@@ -126,6 +130,11 @@ openssl rand -hex 32
 | `SENTRY_PROJECT` | Optional | Needed only for source map upload |
 | `SENTRY_AUTH_TOKEN` | Optional | Needed only for source map upload |
 
+Admin browser sessions use an HttpOnly refresh cookie with `SameSite=Lax`. Deploy the
+admin and API over HTTPS on sibling hosts of the same registrable domain (for example
+`admin.annaiillam.in` and `api.annaiillam.in`), and include the exact admin origin in
+`BACKEND_CORS_ORIGINS`. The admin access token is intentionally kept only in memory.
+
 ### Mobile Build-Time Values
 
 The mobile app is not deployed by this runbook, but production mobile builds must point to the production API:
@@ -134,6 +143,7 @@ The mobile app is not deployed by this runbook, but production mobile builds mus
 |---|---|
 | `EXPO_PUBLIC_API_BASE_URL` | `https://api.annaiillam.example/api/v1` |
 | `EXPO_PUBLIC_APP_VARIANT` | `client` or `worker` |
+| `EXPO_PUBLIC_LEGAL_BASE_URL` | `https://annaiillam.example/legal` |
 
 ## 4. Provision Infrastructure
 

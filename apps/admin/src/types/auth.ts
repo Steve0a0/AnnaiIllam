@@ -20,10 +20,16 @@ export type AuthSuccessResponse = {
   message: string;
   data: {
     access_token: string;
-    refresh_token: string;
     token_type: string;
+    csrf_token: string;
     user: AuthUser;
   };
+};
+
+export type CsrfResponse = {
+  success: boolean;
+  message: string;
+  data: { csrf_token: string };
 };
 
 export type MeResponse = {

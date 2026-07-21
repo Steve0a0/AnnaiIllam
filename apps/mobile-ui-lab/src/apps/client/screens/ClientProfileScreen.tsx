@@ -28,7 +28,6 @@ import {
   ReceiptText,
   Shield,
   Sliders,
-  Trash2,
   User,
   X,
 } from 'lucide-react-native';
@@ -201,10 +200,9 @@ export default function ClientProfileScreen() {
                 <ChevronRight size={15} color={C.dangerText} />
               </Pressable>
               <View style={s.hairline} />
-              <Pressable style={s.actionRow} onPress={() =>
-                Alert.alert('Delete account', 'Contact support@annaiillam.com to request deletion.', [{ text: 'OK' }])}>
-                <Trash2 size={15} color={C.muted} />
-                <Text style={[s.actionLabel, { color: C.body }]}>Delete account / contact support</Text>
+              <Pressable style={s.actionRow} onPress={() => navigation.navigate('PrivacySettings')}>
+                <Shield size={15} color={C.body} />
+                <Text style={[s.actionLabel, { color: C.body }]}>Privacy and data</Text>
                 <ChevronRight size={15} color={C.muted} />
               </Pressable>
             </InfoCard>

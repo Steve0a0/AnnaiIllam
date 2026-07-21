@@ -14,6 +14,7 @@ import BiometricSetupScreen from '../screens/auth/BiometricSetupScreen';
 import UnderReviewScreen    from '../screens/auth/UnderReviewScreen';
 import AppNavigator         from './AppNavigator';
 import AuthNavigator        from './AuthNavigator';
+import LegalAcceptanceGate from '../../../shared/screens/LegalAcceptanceGate';
 
 export default function RootNavigator() {
   const {
@@ -80,37 +81,21 @@ export default function RootNavigator() {
     );
   }
 
+  let authenticatedNavigator;
   if (onboardingStep === 'profile_submitted') {
-    return (
-      <NavigationContainer>
-        <UnderReviewScreen />
+    authenticatedNavigator = <NavigationContainer><UnderReviewScreen /></NavigationContainer>;
+  } else if (onboardingStep === 'approved' && !biometricSetupDone) {
+    authenticatedNavigator = <NavigationContainer><BiometricSetupScreen /></NavigationContainer>;
+  } else if (onboardingStep === 'approved' && biometricSetupDone && !isProfileComplete) {
+    authenticatedNavigator = <NavigationContainer><BiometricCheckScreen /></NavigationContainer>;
+  } else {
+    const onboardingRoute = onboardingStep === 'identity_uploaded' ? 'BuildProfile' : 'VerifyIdentity';
+    authenticatedNavigator = (
+      <NavigationContainer ref={navigationRef}>
+        {isProfileComplete === true ? <AppNavigator /> : <AuthNavigator initialRouteName={onboardingRoute} />}
       </NavigationContainer>
     );
   }
 
-  if (onboardingStep === 'approved' && !biometricSetupDone) {
-    return (
-      <NavigationContainer>
-        <BiometricSetupScreen />
-      </NavigationContainer>
-    );
-  }
-
-  if (onboardingStep === 'approved' && biometricSetupDone && !isProfileComplete) {
-    return (
-      <NavigationContainer>
-        <BiometricCheckScreen />
-      </NavigationContainer>
-    );
-  }
-
-  return (
-    <NavigationContainer ref={navigationRef}>
-      {isProfileComplete === true ? (
-        <AppNavigator />
-      ) : (
-        <AuthNavigator />
-      )}
-    </NavigationContainer>
-  );
+  return <LegalAcceptanceGate source="worker_mobile">{authenticatedNavigator}</LegalAcceptanceGate>;
 }

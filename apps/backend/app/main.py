@@ -15,6 +15,7 @@ from app.api.admin_dashboard import router as admin_dashboard_router
 from app.api.admin_maintenance import router as admin_maintenance_router
 from app.api.admin_worker_payments import router as admin_worker_payments_router
 from app.api.admin_payroll import router as admin_payroll_router
+from app.api.admin_privacy import router as admin_privacy_router
 from app.api.admin_people import router as admin_people_router
 from app.api.admin_finance import router as admin_finance_router
 from app.api.admin_invoice import router as admin_invoice_router
@@ -68,7 +69,7 @@ app.add_middleware(
     allow_origins=settings.backend_cors_origins_list,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
 )
 
 app.middleware("http")(security_headers_middleware)
@@ -99,6 +100,7 @@ app.include_router(worker_payroll_router, prefix=settings.api_v1_prefix)
 app.include_router(worker_issues_router, prefix=settings.api_v1_prefix)
 app.include_router(admin_attendance_router, prefix=settings.api_v1_prefix)
 app.include_router(admin_payroll_router, prefix=settings.api_v1_prefix)
+app.include_router(admin_privacy_router, prefix=settings.api_v1_prefix)
 app.include_router(client_payments_router, prefix=settings.api_v1_prefix)
 app.include_router(client_ratings_router, prefix=settings.api_v1_prefix)
 app.include_router(payment_webhooks_router, prefix=settings.api_v1_prefix)

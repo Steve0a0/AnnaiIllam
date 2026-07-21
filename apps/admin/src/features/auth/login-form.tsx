@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { authService } from "@/services/auth.service";
-import { authStorage } from "@/lib/auth-storage";
 import { useAuthStore } from "@/store/auth-store";
 import { getErrorMessage } from "@/lib/get-error-message";
 import { cn } from "@/lib/cn";
@@ -72,12 +71,9 @@ export default function LoginForm() {
       const response = await authService.login({ email: normalizedEmail, password });
       const authData = response.data;
 
-      authStorage.setTokens(authData.access_token, authData.refresh_token);
-      authStorage.setUser(authData.user);
-
       setAuth({
         accessToken: authData.access_token,
-        refreshToken: authData.refresh_token,
+        csrfToken: authData.csrf_token,
         user: authData.user,
       });
 

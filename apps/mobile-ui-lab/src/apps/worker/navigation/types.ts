@@ -2,7 +2,6 @@ export type WorkerAuthStackParamList = {
   Welcome: undefined;
   Login: undefined;
   VerifyOtp: { phone: string; devOtp?: string };
-  Consent: undefined;
   VerifyIdentity: undefined;
   BuildProfile: undefined;
   ProfileSubmitted: undefined;
@@ -41,6 +40,7 @@ export type AttendanceStackParamList = {
 export type ProfileStackParamList = {
   Profile: undefined;
   Availability: undefined;
+  PrivacySettings: undefined;
 };
 
 // Backward-compat alias — screens that navigated via the old single stack

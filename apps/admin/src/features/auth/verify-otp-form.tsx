@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import Button from "@/components/ui/button";
 import Input from "@/components/ui/input";
 import { authService } from "@/services/auth.service";
-import { authStorage } from "@/lib/auth-storage";
 import { useAuthStore } from "@/store/auth-store";
 import { getErrorMessage } from "@/lib/get-error-message";
 
@@ -38,12 +37,9 @@ export default function VerifyOtpForm({
       const response = await authService.verifyOtp({ phone, code: code.trim() });
       const authData = response.data;
 
-      authStorage.setTokens(authData.access_token, authData.refresh_token);
-      authStorage.setUser(authData.user);
-
       setAuth({
         accessToken: authData.access_token,
-        refreshToken: authData.refresh_token,
+        csrfToken: authData.csrf_token,
         user: authData.user,
       });
 

@@ -15,6 +15,7 @@ import {
   ScrollText,
   Settings,
   ShieldCheck,
+  UserRoundX,
   Timer,
   Users,
 } from "lucide-react";
@@ -67,6 +68,7 @@ const navGroups: NavGroup[] = [
       },
       { label: "Reports", href: "/reports", icon: BarChart3 },
       { label: "Audit Log", href: "/audit", icon: ScrollText },
+      { label: "Privacy Requests", href: "/privacy-requests", icon: UserRoundX },
       { label: "SLA Policies", href: "/sla", icon: Timer },
       { label: "Admin Users", href: "/admin-users", icon: ShieldCheck },
       { label: "Settings", href: "/settings", icon: Settings },
@@ -120,7 +122,7 @@ export default function AppSidebar({ ...props }: React.ComponentProps<typeof Sid
           groups={navGroups.map((group) => ({
             ...group,
             items: group.items.filter(
-              (item) => item.href !== "/admin-users" || isSuperAdmin
+              (item) => !["/admin-users", "/privacy-requests"].includes(item.href) || isSuperAdmin
             ),
           }))}
         />

@@ -28,7 +28,7 @@
 ## Backend Architecture (audited 2026-05-08)
 
 - 25 SQLAlchemy models, 22 Alembic migrations — schema is complete and comprehensive.
-- Auth: OTP (phone) for client/worker; phone + password for admin. JWT access (30 min) + refresh (30 days). Refresh token stored hashed in DB.
+- Auth: OTP (phone) for client/worker; email + password for admin. Client/worker retain body refresh tokens. Admin uses a five-minute in-memory access token plus an HttpOnly rotating refresh cookie, family-bound CSRF, exact-origin checks, and reuse-family revocation.
 - RBAC via `require_role()` FastAPI dependency on all protected routes (`app/api/dependencies/roles.py`).
 - Services layer: 16 services in `app/services/`. Repositories in `app/repositories/`. Clean separation.
 - Field-level encryption (Fernet) on sensitive worker fields: UPI, bank account, IFSC.
@@ -41,8 +41,8 @@
 ## Admin Dashboard Architecture (audited 2026-05-08)
 
 - Next.js 16 App Router with route groups: `(auth)` for `/login`, `(dashboard)` for all protected pages.
-- Auth: phone + password only. OTP login intentionally disabled (throws error). JWT stored in localStorage under keys `admin_access_token`, `admin_refresh_token`, `admin_user`.
-- Axios interceptor in `src/services/api-client.ts` handles 401 + auto-refresh.
+- Auth: email + password only. OTP login intentionally disabled (throws error). Admin auth data is not persisted in Web Storage; the access/CSRF values live in Zustand memory and refresh uses the backend HttpOnly cookie.
+- Axios interceptor in `src/services/api-client.ts` handles 401 with a single shared refresh promise so concurrent requests cannot replay a rotated cookie.
 - State: Zustand (`src/store/auth-store.ts`) for auth; React Query for all server data.
 - All 16+ pages are built, routed, and sidebar-linked. Payroll, Finance, Reports, Audit Log, SLA Policies all added to sidebar in `src/components/layout/sidebar.tsx` (fixed 2026-05-08).
 - Feature folders: `src/features/{requirements,assignments,attendance,complaints,payroll,finance,reports,dashboard,auth}/` — each has components + React Query hooks.
@@ -208,6 +208,10 @@ Four core-flow bugs fixed as part of a structured audit. 111 backend tests pass 
 - Issued invoice HTML is stored once and reused by admin, client/mobile, and email. Migration `e8f91b24c6a0` adds the snapshot, sequence table, and PostgreSQL immutability trigger; CA sample approval and e-invoice applicability remain release gates in `docs/GST_INVOICE_CA_REVIEW.md`.
 - Social login is opt-in with `GOOGLE_AUTH_ENABLED` / `APPLE_AUTH_ENABLED`. Enabled Google requires at least one configured web/iOS/Android audience; enabled Apple requires `APPLE_APP_BUNDLE_ID`. Verification rejects disabled/misconfigured providers before external calls and always validates audience.
 - **Fix 10 — Worker phone update had no uniqueness check** (`admin_people.py:755-759`): Added `get_user_by_phone` lookup before setting new phone; raises HTTP 409 if another account already uses it. Phone is `.strip()`-normalised before comparison. Tests: `TestWorkerPhoneUniqueness` in `tests/test_people.py` (4 tests).
+
+- Privacy requests use the PrivacyRequest model, current-user request endpoints, and a super-admin-only queue. Deletion anonymizes users/profiles and removes credentials, sessions, KYC objects, and attendance location/selfie data while retaining stable user/profile IDs so invoice and payroll foreign keys survive. Mobile client and worker variants share PrivacySettingsScreen.
+- Legal policy version `2026-07-21` is server-authoritative in `legal_document_service.py`. Client/worker mobile roots fail closed until all role-required documents are accepted; immutable acceptance rows record user, role, version, source, and time. Public pages live under admin `/legal`; approval checklist is `docs/LEGAL_PUBLICATION_APPROVAL.md`.
+- Worker classification is intentionally undecided and blocks the pilot. `docs/WORKER_CLASSIFICATION_COUNSEL_PACK.md` is the external counsel brief; `docs/WORKER_CLASSIFICATION_DECISION_AND_TICKETS.md` holds the signed decision and conditional implementation tickets. Do not change payroll semantics or agreements until counsel selects the model.
 
 ## Admin Clients Page (implemented 2026-05-08)
 

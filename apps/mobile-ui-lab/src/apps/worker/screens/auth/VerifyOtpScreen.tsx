@@ -24,7 +24,7 @@ import { C, authStyles as baseStyles } from './styles';
 const OTP_LENGTH = 6;
 type Props = NativeStackScreenProps<WorkerAuthStackParamList, 'VerifyOtp'>;
 
-export default function VerifyOtpScreen({ navigation, route }: Props) {
+export default function VerifyOtpScreen({ route }: Props) {
   const { phone, devOtp } = route.params;
   const { setAuth } = useAuthStore();
   const inputRef = useRef<TextInput>(null);
@@ -90,15 +90,8 @@ export default function VerifyOtpScreen({ navigation, route }: Props) {
         biometricSetupDone: biometricSetupDone ?? false,
       });
 
-      // RootNavigator handles 'approved' and 'profile_submitted' automatically.
-      // For all other steps, navigate explicitly.
-      if (onboardingStep === 'approved' || onboardingStep === 'profile_submitted') {
-        return;
-      } else if (onboardingStep === 'identity_uploaded') {
-        navigation.replace('BuildProfile');
-      } else {
-        navigation.replace('Consent');
-      }
+      // RootNavigator now gates the current legal version, then resumes the
+      // correct onboarding, review, biometric, or application route.
     } catch (err) {
       Alert.alert('Error', getApiError(err, 'Invalid code. Please try again.'));
     } finally {

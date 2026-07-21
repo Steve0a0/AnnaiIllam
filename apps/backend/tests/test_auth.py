@@ -2,7 +2,9 @@
 from datetime import timedelta
 from unittest.mock import patch
 
-from app.core.security import hash_password
+from app.core.config import settings
+from app.core.security import decode_token, hash_password
+from app.models.refresh_token import RefreshToken
 from app.models.otp_code import OtpCode
 from app.models.user import User
 from app.utils.time import utcnow
@@ -218,7 +220,7 @@ class TestRoleMismatch:
 
 @patch("app.api.auth.check_rate_limit")  # test login logic, not rate limiting
 class TestAdminLogin:
-    def test_valid_credentials_return_tokens(self, _rl, client, admin_user):
+    def test_valid_credentials_return_browser_session(self, _rl, client, admin_user):
         res = client.post(
             f"{BASE}/auth/admin/login",
             json={"email": admin_user.email, "password": "AdminPass123!"},
@@ -226,8 +228,19 @@ class TestAdminLogin:
         assert res.status_code == 200
         data = res.json()["data"]
         assert "access_token" in data
-        assert "refresh_token" in data
+        assert "refresh_token" not in data
+        assert "csrf_token" in data
         assert data["user"]["role"] == "admin"
+        set_cookie = res.headers.get("set-cookie", "")
+        assert "admin_refresh_token=" in set_cookie
+        assert "HttpOnly" in set_cookie
+        assert "SameSite=lax" in set_cookie
+
+        token_payload = decode_token(data["access_token"])
+        assert (
+            token_payload["exp"] - token_payload["iat"]
+            == settings.admin_access_token_expire_minutes * 60
+        )
 
     def test_wrong_password_rejected(self, _rl, client, admin_user):
         res = client.post(
@@ -290,15 +303,127 @@ class TestAdminLogin:
 
 
 # ---------------------------------------------------------------------------
-# Token refresh
+# Admin browser session: HttpOnly refresh, CSRF, rotation, reuse detection
+# ---------------------------------------------------------------------------
+
+@patch("app.api.auth.check_rate_limit")
+class TestAdminBrowserSession:
+    def _login(self, client, admin_user):
+        response = client.post(
+            f"{BASE}/auth/admin/login",
+            json={"email": admin_user.email, "password": "AdminPass123!"},
+        )
+        assert response.status_code == 200
+        return response.json()["data"]
+
+    def test_refresh_requires_csrf_header(self, _rl, client, admin_user):
+        self._login(client, admin_user)
+        response = client.post(f"{BASE}/auth/admin/refresh")
+        assert response.status_code == 403
+
+    def test_csrf_bootstrap_rejects_untrusted_origin(self, _rl, client, admin_user):
+        self._login(client, admin_user)
+        response = client.get(
+            f"{BASE}/auth/admin/csrf",
+            headers={"Origin": "https://attacker.example"},
+        )
+        assert response.status_code == 403
+
+    def test_refresh_rotates_cookie_without_exposing_it(self, _rl, client, admin_user):
+        login = self._login(client, admin_user)
+        first_refresh = client.cookies.get("admin_refresh_token")
+
+        response = client.post(
+            f"{BASE}/auth/admin/refresh",
+            headers={"X-CSRF-Token": login["csrf_token"]},
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert "refresh_token" not in data
+        assert data["access_token"]
+        assert data["user"]["role"] == "admin"
+        assert client.cookies.get("admin_refresh_token") != first_refresh
+
+    def test_rotated_token_reuse_revokes_entire_family(self, _rl, client, db, admin_user):
+        login = self._login(client, admin_user)
+        old_refresh = client.cookies.get("admin_refresh_token")
+        response = client.post(
+            f"{BASE}/auth/admin/refresh",
+            headers={"X-CSRF-Token": login["csrf_token"]},
+        )
+        assert response.status_code == 200
+        newest_refresh = client.cookies.get("admin_refresh_token")
+        newest_csrf = response.json()["data"]["csrf_token"]
+
+        client.cookies.set(
+            "admin_refresh_token",
+            old_refresh,
+            domain="testserver.local",
+            path=f"{BASE}/auth/admin",
+        )
+        replay = client.post(
+            f"{BASE}/auth/admin/refresh",
+            headers={"X-CSRF-Token": newest_csrf},
+        )
+        assert replay.status_code == 401
+
+        records = list(db.query(RefreshToken).all())
+        assert records
+        assert all(record.is_revoked for record in records)
+
+        client.cookies.set(
+            "admin_refresh_token",
+            newest_refresh,
+            domain="testserver.local",
+            path=f"{BASE}/auth/admin",
+        )
+        client.cookies.set(
+            "admin_csrf_token",
+            newest_csrf,
+            domain="testserver.local",
+            path=f"{BASE}/auth/admin",
+        )
+        assert client.get(f"{BASE}/auth/admin/csrf").status_code == 401
+
+    def test_logout_clears_cookie_and_revokes_access(self, _rl, client, admin_user):
+        login = self._login(client, admin_user)
+        response = client.post(
+            f"{BASE}/auth/admin/logout",
+            headers={
+                "Authorization": f"Bearer {login['access_token']}",
+                "X-CSRF-Token": login["csrf_token"],
+            },
+        )
+        assert response.status_code == 200
+        assert client.cookies.get("admin_refresh_token") is None
+        me = client.get(
+            f"{BASE}/me",
+            headers={"Authorization": f"Bearer {login['access_token']}"},
+        )
+        assert me.status_code == 401
+
+    def test_untrusted_origin_is_rejected(self, _rl, client, admin_user):
+        response = client.post(
+            f"{BASE}/auth/admin/login",
+            json={"email": admin_user.email, "password": "AdminPass123!"},
+            headers={"Origin": "https://attacker.example"},
+        )
+        assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Mobile/body token refresh
 # ---------------------------------------------------------------------------
 
 @patch("app.api.auth.check_rate_limit")  # test refresh logic, not rate limiting
 class TestTokenRefresh:
-    def _login(self, client, admin_user):
+    def _login(self, client, _admin_user):
+        phone = "9555555555"
+        request = client.post(f"{BASE}/auth/client/request-otp", json={"phone": phone})
         res = client.post(
-            f"{BASE}/auth/admin/login",
-            json={"email": admin_user.email, "password": "AdminPass123!"},
+            f"{BASE}/auth/client/verify-otp",
+            json={"phone": phone, "code": request.json()["data"]["otp"]},
         )
         return res.json()["data"]
 
@@ -340,13 +465,14 @@ class TestTokenRefresh:
 # Logout
 
 class TestLogout:
-    def _login(self, client, admin_user):
+    def _login(self, client, _admin_user):
+        phone = "9666666666"
         # Bypass rate limit — this class is testing logout, not login rate limiting.
-        with patch("app.api.auth.check_rate_limit"):
-            res = client.post(
-                f"{BASE}/auth/admin/login",
-                json={"email": admin_user.email, "password": "AdminPass123!"},
-            )
+        request = client.post(f"{BASE}/auth/client/request-otp", json={"phone": phone})
+        res = client.post(
+            f"{BASE}/auth/client/verify-otp",
+            json={"phone": phone, "code": request.json()["data"]["otp"]},
+        )
         return res.json()["data"]
 
     def test_logout_success(self, client, admin_user):

@@ -2,6 +2,7 @@ import { http } from "@/lib/http";
 import type {
   AdminLoginPayload,
   AuthSuccessResponse,
+  CsrfResponse,
   MeResponse,
 } from "@/types/auth";
 
@@ -24,16 +25,21 @@ export const authService = {
     return res.data;
   },
 
-  refreshToken: async (refreshToken: string) => {
-    const res = await http.post("/auth/refresh", {
-      refresh_token: refreshToken,
+  getCsrfToken: async (): Promise<CsrfResponse> => {
+    const res = await http.get("/auth/admin/csrf");
+    return res.data;
+  },
+
+  refreshSession: async (csrfToken: string): Promise<AuthSuccessResponse> => {
+    const res = await http.post("/auth/admin/refresh", undefined, {
+      headers: { "X-CSRF-Token": csrfToken },
     });
     return res.data;
   },
 
-  logout: async (refreshToken: string) => {
-    const res = await http.post("/auth/logout", {
-      refresh_token: refreshToken,
+  logout: async (csrfToken: string) => {
+    const res = await http.post("/auth/admin/logout", undefined, {
+      headers: { "X-CSRF-Token": csrfToken },
     });
     return res.data;
   },
