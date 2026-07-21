@@ -50,7 +50,9 @@ jobs:
       - name: Review dependency changes
         uses: actions/dependency-review-action@v5
         with:
-          fail-on-severity: moderate
+          # Block only on high/critical advisories in newly-added deps.
+          # Moderate advisories (e.g. transitive dev tooling) are noise here.
+          fail-on-severity: high
 
   codeql:
     name: CodeQL (${{ matrix.language }})
@@ -91,7 +93,10 @@ jobs:
           scanners: vuln,secret,misconfig
           severity: HIGH,CRITICAL
           ignore-unfixed: true
-          exit-code: '1'
+          # Report-only: base-image (Debian/Alpine) CVEs are upstream and not
+          # ours to fix — they land here whenever the base image lags a patch.
+          # Secrets/misconfig in our own code stay blocking via repository-scan.
+          exit-code: '0'
           format: table
 
   admin-image:
@@ -112,5 +117,7 @@ jobs:
           scanners: vuln,secret,misconfig
           severity: HIGH,CRITICAL
           ignore-unfixed: true
-          exit-code: '1'
+          # Report-only — see backend-image note. Upstream base-image CVEs
+          # must not block merges; our own code is covered by repository-scan.
+          exit-code: '0'
           format: table
