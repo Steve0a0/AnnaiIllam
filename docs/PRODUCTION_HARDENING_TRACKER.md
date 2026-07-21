@@ -172,6 +172,7 @@ Verification:
 - The first `production-hardening` GitHub Actions run registered all required check names. Both CodeQL jobs passed; dependency review correctly skipped because the event was a branch push rather than a pull request.
 - The first run exposed a Redis health-command quoting defect and high/critical npm advisories. The follow-up fixes the Redis option, updates the admin/mobile lockfiles, pins patched Next.js, and overrides the vulnerable transitive mobile `ws` release.
 - The exact admin and mobile production audit commands now exit successfully with no high or critical advisories.
+- On 2026-07-21, newly published `fast-uri` and Sharp/libvips advisories made the admin gate red again. Admin now overrides `fast-uri` 3.1.4, PostCSS 8.5.14, and Sharp 0.35.3; `npm audit --omit=dev --audit-level=high`, tests, lint, and the Next.js production build pass locally.
 - Backend vulnerable pins were upgraded as a compatible FastAPI/Starlette and pytest/pytest-asyncio set. `python -m pip_audit -r requirements.txt` reports no known vulnerabilities.
 - Docker 29.6.1 is available, but local image builds were not run because PROD-031 has not yet excluded local environment files from Docker build contexts.
 - Admin lint/build, mobile TypeScript, backend Ruff, and the full backend suite are green locally. The backend suite passes 796/796 tests against PostgreSQL and Redis after the dependency, scheduler, no-show, and timezone upgrades.

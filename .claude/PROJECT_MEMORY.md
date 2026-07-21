@@ -203,6 +203,7 @@ Four core-flow bugs fixed as part of a structured audit. 111 backend tests pass 
 - Admin build fixes include a stable React Query timestamp for requirement age,
   local `useQueryClient()` initialization in `WorkerReviewPanel`, and
   `worker_daily_rate` in `CreateQuotePayload`.
+- Admin pins vulnerable transitive packages through `package.json` overrides: `fast-uri` 3.1.4, PostCSS 8.5.14, and Sharp 0.35.3. Keep these until direct Next/Sentry dependency ranges resolve to patched releases; the exact production npm audit is clean.
 - Mobile `clientStyles.C` now defines the semantic `neutralBg` token.
 - GST tax invoices are separate from payment receipts. `gst_invoice_service.py` owns validated supplier/client snapshots, SAC and place-of-supply tax splitting, financial-year numbering, immutable HTML/hash creation, and shared document responses.
 - Issued invoice HTML is stored once and reused by admin, client/mobile, and email. Migration `e8f91b24c6a0` adds the snapshot, sequence table, and PostgreSQL immutability trigger; CA sample approval and e-invoice applicability remain release gates in `docs/GST_INVOICE_CA_REVIEW.md`.
