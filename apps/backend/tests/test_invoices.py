@@ -15,7 +15,6 @@ import pytest
 from app.core.statuses import RequirementStatus
 from app.core.payment_constants import PaymentModel
 from app.models.client_profile import ClientProfile
-from app.models.invoice import Invoice
 from app.models.quote import Quote
 from app.models.requirement import Requirement
 from app.services.token_service import build_token_pair

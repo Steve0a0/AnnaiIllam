@@ -9,7 +9,6 @@ Covers:
 from datetime import date, timedelta
 from unittest.mock import patch
 
-import pytest
 
 from app.core.scheduler import check_sla_breaches
 from app.core.statuses import RequirementStatus
@@ -90,7 +89,7 @@ def test_sla_breach_flagged_and_admin_notified(mock_push, db, client_user, admin
 def test_within_sla_not_flagged(mock_push, db, client_user):
     req = make_submitted_requirement(db, client_user, age_hours=23, sla_hours=24)
 
-    result = check_sla_breaches(db)
+    check_sla_breaches(db)
 
     # This requirement should NOT be flagged
     db.refresh(req)
@@ -108,7 +107,7 @@ def test_within_sla_not_flagged(mock_push, db, client_user):
 
 @patch("app.core.scheduler.send_push_to_user")
 def test_second_run_does_not_re_notify(mock_push, db, client_user, admin_user):
-    req = make_submitted_requirement(db, client_user, age_hours=26, sla_hours=24)
+    make_submitted_requirement(db, client_user, age_hours=26, sla_hours=24)
 
     # First run — should flag
     result1 = check_sla_breaches(db)
@@ -134,7 +133,7 @@ def test_under_review_requirement_not_flagged(mock_push, db, client_user):
     req.status = RequirementStatus.UNDER_REVIEW.value
     db.commit()
 
-    result = check_sla_breaches(db)
+    check_sla_breaches(db)
 
     db.refresh(req)
     assert req.sla_breach_notified_at is None

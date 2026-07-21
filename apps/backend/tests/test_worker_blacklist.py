@@ -13,11 +13,9 @@ from datetime import date
 import pytest
 
 from app.models.client_profile import ClientProfile
-from app.models.client_worker_blacklist import ClientWorkerBlacklist
 from app.models.requirement import Requirement
 from app.models.worker_profile import WorkerProfile
 from app.models.user import User
-from app.core.security import hash_password
 from app.services.token_service import build_token_pair
 
 BASE = "/api/v1"

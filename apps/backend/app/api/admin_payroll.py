@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 from app.api.dependencies.roles import require_permission_group, require_role
 from app.core.payroll_constants import DeductionType, PayrollItemPaymentStatus, PayrollRunStatus
 from app.core.rate_limit import check_rate_limit
-from app.core.rate_limit import check_rate_limit
 from app.core.roles import UserRole
 from app.db.deps import get_db
 from app.models.user import User

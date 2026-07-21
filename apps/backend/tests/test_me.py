@@ -10,9 +10,8 @@ Covers:
 
 import pytest
 
-from app.core.security import hash_password, verify_password
+from app.core.security import verify_password
 from app.models.client_profile import ClientProfile
-from app.models.user import User
 from app.services.token_service import build_token_pair
 
 BASE = "/api/v1"

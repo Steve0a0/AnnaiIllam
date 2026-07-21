@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies.roles import require_role
 from app.core.assignment_constants import AssignmentStatus, validate_assignment_transition
-from app.core.payment_constants import ClientPaymentStatus
 from app.core.roles import UserRole
 from app.core.statuses import RequirementStatus, validate_requirement_transition
 from app.db.deps import get_db
@@ -35,6 +34,7 @@ from app.services.assignment_service import build_assignment_entity
 from app.services.worker_matching_service import detect_worker_conflict, get_worker_matches, get_worker_schedule_mismatch
 from app.services.worker_matching_service import ASSIGNABLE_VERIFICATION_STATUSES, get_expired_documents
 from app.services.notification_service import enqueue_push_to_user, send_push_to_user
+from app.services.payment_ledger_service import has_required_advance
 from app.utils.audit import audit_event
 from app.utils.pagination import PaginationParams, paginate, pagination_meta
 from app.utils.response import success_response
@@ -133,17 +133,20 @@ def create_admin_assignment(
     # Payment gate: at least one PAID payment is required before assigning workers,
     # UNLESS the quote has no advance requirement (advance_amount is null or 0).
     quote = get_quote_by_requirement_id(db, payload.requirement_id)
-    advance_required = quote is not None and (quote.advance_amount or 0) > 0
     if skip_payment_check:
         if not skip_reason or not skip_reason.strip():
             raise HTTPException(
                 status_code=400,
                 detail="skip_reason is required when skip_payment_check=true.",
             )
-    elif advance_required:
+    elif quote is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot assign workers — no confirmed payment ledger exists because no quote was found.",
+        )
+    elif (quote.advance_amount or 0) > 0:
         payments = get_client_payments_by_requirement_id(db, payload.requirement_id)
-        has_paid = any(p.payment_status == ClientPaymentStatus.PAID.value for p in payments)
-        if not has_paid:
+        if not has_required_advance(quote, payments):
             raise HTTPException(
                 status_code=400,
                 detail="Cannot assign workers — no confirmed advance payment for this requirement. "
@@ -172,7 +175,7 @@ def create_admin_assignment(
         if day_count >= requirement.number_of_workers:
             raise HTTPException(
                 status_code=400,
-                detail=f"{check_day} is already fully staffed "
+                detail=f"{check_day} is already at full capacity "
                        f"({day_count}/{requirement.number_of_workers} workers). "
                        f"Choose a different date range.",
             )
@@ -200,6 +203,9 @@ def create_admin_assignment(
     if worker_profile.verification_status not in ASSIGNABLE_VERIFICATION_STATUSES:
         raise HTTPException(status_code=400, detail="Only approved workers can be assigned")
 
+    if not worker_profile.is_available:
+        raise HTTPException(status_code=400, detail="Worker is not available")
+
     schedule_mismatch = get_worker_schedule_mismatch(worker_profile, requirement)
     if schedule_mismatch:
         raise HTTPException(status_code=400, detail=f"Worker is {schedule_mismatch}")
@@ -219,7 +225,7 @@ def create_admin_assignment(
         if ex_start <= new_end and new_start <= ex_end:
             raise HTTPException(
                 status_code=400,
-                detail=f"Worker is already assigned for this date range on this requirement",
+                detail="Worker is already assigned for this date range on this requirement",
             )
 
     conflict = detect_worker_conflict(db, payload.worker_profile_id, requirement)
@@ -233,6 +239,10 @@ def create_admin_assignment(
         assignment.salary_amount = quote.worker_daily_rate
 
     create_assignment(db, assignment)
+
+    # Fix 16: an assigned worker is occupied — mark unavailable so they can't be
+    # double-booked. Restored when the assignment reaches a terminal state.
+    worker_profile.is_available = False
 
     # Fix 15: sync WorkerInterest status so the interest panel reflects the assignment
     _interest = db.execute(
@@ -412,6 +422,12 @@ def update_assignment_status(
     assignment.status = payload.status
     db.flush()
 
+    # Fix 16: a terminal status frees the worker to be assigned again.
+    if payload.status in _FREEING_STATUSES:
+        freed_worker = get_worker_profile_by_id(db, assignment.worker_profile_id)
+        if freed_worker:
+            freed_worker.is_available = True
+
     requirement = get_requirement_by_id(db, assignment.requirement_id)
     if (
         requirement
@@ -474,6 +490,14 @@ _CONFIRMED_STATUSES = {
     AssignmentStatus.ACCEPTED.value,
     AssignmentStatus.ACTIVE.value,
     AssignmentStatus.COMPLETED.value,
+}
+
+# Fix 16: reaching any of these frees the worker to be assigned again.
+_FREEING_STATUSES = {
+    AssignmentStatus.DECLINED.value,
+    AssignmentStatus.CANCELLED.value,
+    AssignmentStatus.COMPLETED.value,
+    AssignmentStatus.REPLACED.value,
 }
 
 
@@ -642,6 +666,10 @@ def replace_worker(
     if not new_worker_profile:
         raise HTTPException(status_code=404, detail="New worker profile not found")
 
+    # Capture the outgoing worker now — needed for the reassignment notification
+    # after the swap. May be None if the profile was deleted; guarded at use.
+    old_worker_profile = get_worker_profile_by_id(db, old_assignment.worker_profile_id)
+
     # Duplicate check: new worker must not already have an active assignment on this requirement.
     # Checked before availability so the error message is specific and actionable.
     existing = find_existing_assignment(db, requirement.id, payload.new_worker_profile_id)
@@ -700,6 +728,11 @@ def replace_worker(
     ).scalar_one_or_none()
     if _interest:
         _interest.status = "assigned"
+
+    # Fix 16: free the outgoing worker, occupy the incoming one.
+    if old_worker_profile:
+        old_worker_profile.is_available = True
+    new_worker_profile.is_available = False
 
     db.commit()
 

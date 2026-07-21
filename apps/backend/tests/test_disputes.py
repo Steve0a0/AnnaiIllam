@@ -14,7 +14,7 @@ import pytest
 
 from app.core.statuses import RequirementStatus
 from app.models.client_profile import ClientProfile
-from app.models.dispute import Dispute, DisputeCreditNote
+from app.models.dispute import DisputeCreditNote
 from app.models.requirement import Requirement
 from app.models.user import User
 from app.services.token_service import build_token_pair

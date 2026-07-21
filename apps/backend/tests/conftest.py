@@ -34,9 +34,14 @@ from app.models.user import User
 _REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/15")
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(autouse=True)
 def flush_redis():
-    """Flush the test Redis database before the test session to clear stale rate-limit keys."""
+    """Flush the test Redis database before EACH test.
+
+    Function-scoped (not session) so rate-limit counters from one test never
+    bleed into the next — otherwise later auth/OTP tests hit 429 and fail only
+    in a full run while passing in isolation.
+    """
     try:
         r = redis_lib.Redis.from_url(_REDIS_URL, decode_responses=True)
         r.flushdb()

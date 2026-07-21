@@ -113,7 +113,6 @@ def _make_approved_quote(db, requirement, admin_user, quoted_amount: int = 30000
 def _make_assignment(db, requirement, admin_user, end_date: date) -> Assignment:
     from app.models.worker_profile import WorkerProfile
     from app.models.user import User
-    from app.core.security import hash_password
 
     worker_user = User(
         phone="9100000099",

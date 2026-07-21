@@ -3,7 +3,7 @@ from datetime import date as date_type
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.roles import require_permission_group, require_role
@@ -27,7 +27,7 @@ from app.schemas.attendance import AttendanceCorrectionSchema
 from app.services.notification_service import enqueue_push_to_user
 from app.utils.audit import audit_event
 from app.utils.response import success_response
-from app.utils.time import utcnow
+from app.utils.time import utcnow, business_today
 
 router = APIRouter(prefix="/admin/attendance", tags=["Admin Attendance"])
 security_logger = logging.getLogger("annai_illam_security")
@@ -44,7 +44,7 @@ def list_all_attendance(
 ):
     """Return attendance records filtered by date (defaults to today), requirement, or status."""
     # Default to today when no date supplied
-    effective_date = date if date else str(utcnow().date())
+    effective_date = date if date else str(business_today())
 
     stmt = (
         select(Attendance, Assignment.requirement_id.label("req_id"))
