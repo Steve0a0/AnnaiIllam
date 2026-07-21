@@ -35,7 +35,7 @@ export default function ProfileSetupScreen(_props: Props) {
   const [companyName, setCompanyName] = useState('');
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(user?.email ?? '');
   const [isSaving, setIsSaving] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
 

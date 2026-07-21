@@ -12,7 +12,7 @@ Mocking strategy:
 """
 
 from datetime import date, timedelta
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -319,6 +319,19 @@ def pending_client_payment(db, notif_client_profile, client_user, admin_user):
     db.add(req)
     db.commit()
     db.refresh(req)
+
+    # Payment ledger (PROD-004) requires an approved quote before any payment.
+    db.add(
+        Quote(
+            requirement_id=req.id,
+            quoted_amount=25000,
+            advance_amount=25000,
+            payment_model="client_pays_company",
+            status="approved",
+            created_by_user_id=admin_user.id,
+        )
+    )
+    db.commit()
 
     payment = ClientPayment(
         client_id=notif_client_profile.id,

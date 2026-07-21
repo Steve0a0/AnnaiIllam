@@ -1,5 +1,4 @@
-"""Tests for Fix 3 (P1-1): admin_finance update_client_payment_status must call
-validate_requirement_transition() and reject payments below advance_amount."""
+"""Payment confirmation updates the ledger without changing operational state."""
 from datetime import date, timedelta
 
 import pytest
@@ -107,9 +106,9 @@ def admin_headers(db, admin_user):
 
 
 class TestPaymentStatusTransitionGuards:
-    """Fix 3: validate_requirement_transition() called and advance_amount enforced."""
+    """Finance status changes never bypass operational lifecycle actions."""
 
-    def test_payment_below_advance_amount_is_rejected(
+    def test_partial_advance_payment_is_confirmed_without_transition(
         self,
         client,
         db,
@@ -119,7 +118,7 @@ class TestPaymentStatusTransitionGuards:
         requirement_quote,
         admin_user,
     ):
-        """Marking a Rs. 9999 payment paid on a Rs. 10000 advance must return 400."""
+        """Split advances are valid, but do not unlock state automatically."""
         payment = _make_pending_payment(
             db, client_profile, approved_requirement, admin_user, amount=9999
         )
@@ -130,13 +129,13 @@ class TestPaymentStatusTransitionGuards:
             headers=admin_headers,
         )
 
-        assert response.status_code == 400
-        assert "advance" in response.json()["message"].lower()
+        assert response.status_code == 200
+        assert response.json()["data"]["requirement_auto_transitioned"] is False
 
         db.refresh(approved_requirement)
         assert approved_requirement.status == RequirementStatus.APPROVED.value
 
-    def test_payment_exactly_at_advance_amount_transitions_requirement(
+    def test_exact_advance_does_not_transition_requirement(
         self,
         client,
         db,
@@ -146,7 +145,7 @@ class TestPaymentStatusTransitionGuards:
         requirement_quote,
         admin_user,
     ):
-        """Marking a Rs. 10000 payment paid (= advance_amount) transitions to workers_assigned."""
+        """Operations must assign workers after the aggregate advance is met."""
         payment = _make_pending_payment(
             db, client_profile, approved_requirement, admin_user, amount=10000
         )
@@ -159,13 +158,13 @@ class TestPaymentStatusTransitionGuards:
 
         assert response.status_code == 200
         data = response.json()["data"]
-        assert data["requirement_auto_transitioned"] is True
-        assert data["new_requirement_status"] == RequirementStatus.WORKERS_ASSIGNED.value
+        assert data["requirement_auto_transitioned"] is False
+        assert data["new_requirement_status"] is None
 
         db.refresh(approved_requirement)
-        assert approved_requirement.status == RequirementStatus.WORKERS_ASSIGNED.value
+        assert approved_requirement.status == RequirementStatus.APPROVED.value
 
-    def test_payment_above_advance_amount_also_transitions(
+    def test_payment_above_advance_does_not_transition(
         self,
         client,
         db,
@@ -175,7 +174,7 @@ class TestPaymentStatusTransitionGuards:
         requirement_quote,
         admin_user,
     ):
-        """A payment larger than advance_amount (Rs. 15000) still transitions correctly."""
+        """A confirmed payment never changes the operational state."""
         payment = _make_pending_payment(
             db, client_profile, approved_requirement, admin_user, amount=15000
         )
@@ -187,10 +186,10 @@ class TestPaymentStatusTransitionGuards:
         )
 
         assert response.status_code == 200
-        assert response.json()["data"]["requirement_auto_transitioned"] is True
+        assert response.json()["data"]["requirement_auto_transitioned"] is False
 
         db.refresh(approved_requirement)
-        assert approved_requirement.status == RequirementStatus.WORKERS_ASSIGNED.value
+        assert approved_requirement.status == RequirementStatus.APPROVED.value
 
     def test_payment_on_non_approved_requirement_does_not_auto_transition(
         self,
@@ -237,13 +236,13 @@ class TestPaymentStatusTransitionGuards:
             headers=admin_headers,
         )
 
-        assert response.status_code == 200
-        assert response.json()["data"]["requirement_auto_transitioned"] is False
+        assert response.status_code == 400
+        assert "invalid" in response.json()["message"].lower()
 
         db.refresh(submitted_req)
         assert submitted_req.status == RequirementStatus.SUBMITTED.value
 
-    def test_full_payment_on_in_progress_transitions_to_completed(
+    def test_full_payment_on_in_progress_does_not_complete(
         self,
         client,
         db,
@@ -252,7 +251,7 @@ class TestPaymentStatusTransitionGuards:
         admin_user,
         client_user,
     ):
-        """Total paid >= quoted_amount on in_progress requirement → completed."""
+        """Operational completion is independent from balance collection."""
         in_progress_req = Requirement(
             client_id=client_profile.id,
             category="Housekeeping",
@@ -303,11 +302,11 @@ class TestPaymentStatusTransitionGuards:
 
         assert response.status_code == 200
         data = response.json()["data"]
-        assert data["requirement_auto_transitioned"] is True
-        assert data["new_requirement_status"] == RequirementStatus.COMPLETED.value
+        assert data["requirement_auto_transitioned"] is False
+        assert data["new_requirement_status"] is None
 
         db.refresh(in_progress_req)
-        assert in_progress_req.status == RequirementStatus.COMPLETED.value
+        assert in_progress_req.status == RequirementStatus.IN_PROGRESS.value
 
     def test_partial_final_payment_does_not_complete_requirement(
         self,

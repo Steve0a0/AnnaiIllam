@@ -28,9 +28,7 @@ Edge-cases and guards:
 """
 
 import pytest
-from unittest.mock import patch
 
-from app.models.user import User
 from app.models.worker_document import WorkerDocument
 from app.models.worker_profile import WorkerProfile
 from app.services.token_service import build_token_pair

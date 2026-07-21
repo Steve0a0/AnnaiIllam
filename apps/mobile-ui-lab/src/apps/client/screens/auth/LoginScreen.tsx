@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Platform,
@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import { getApiError } from '../../../../shared/lib/get-api-error';
@@ -71,35 +72,84 @@ const GOOGLE_WEB_ID = toUndef(process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID);
 const GOOGLE_IOS_ID = toUndef(process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID);
 const GOOGLE_ANDROID_ID = toUndef(process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID);
 const GOOGLE_CONFIGURED = !!(GOOGLE_IOS_ID || GOOGLE_ANDROID_ID || GOOGLE_WEB_ID);
+const IS_EXPO_GO = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 
 type GoogleBtnProps = { onSignIn: (result: SocialAuthTokens) => Promise<void> };
 
 function GoogleSignInButton({ onSignIn }: GoogleBtnProps) {
   const [isPending, setIsPending] = useState(false);
-  // Do NOT pass redirectUri — the Google provider derives the correct platform-specific
-  // URI from iosClientId / androidClientId (reversed-client-ID scheme).
-  // Overriding it with makeRedirectUri() breaks native builds.
-  const [, , promptAsync] = Google.useAuthRequest({
+  // Expo's Google provider uses the native bundle/package scheme for redirects.
+  // Keep app.json schemes aligned with ios.bundleIdentifier/android.package.
+  const [request, response, promptAsync] = Google.useAuthRequest({
     webClientId: GOOGLE_WEB_ID,
     iosClientId: GOOGLE_IOS_ID,
     androidClientId: GOOGLE_ANDROID_ID,
   });
 
-  const handlePress = async () => {
-    setIsPending(true);
-    try {
-      const response = await promptAsync();
-      if (response?.type !== 'success') return;
-      const idToken = response.authentication?.idToken;
-      if (!idToken) {
-        Alert.alert('Sign-in failed', 'Google did not return a token. Please try again.');
+  useEffect(() => {
+    let isMounted = true;
+
+    const completeGoogleSignIn = async () => {
+      if (!response) return;
+
+      if (response.type === 'cancel' || response.type === 'dismiss') {
+        if (isMounted) setIsPending(false);
         return;
       }
-      const result = await authService.socialAuth({ provider: 'google', id_token: idToken });
-      await onSignIn(result);
+
+      if (response.type === 'error') {
+        if (isMounted) {
+          setIsPending(false);
+          Alert.alert('Sign-in failed', 'Google sign-in was rejected. Please try again.');
+        }
+        return;
+      }
+
+      if (response.type !== 'success') return;
+
+      const idToken = response.authentication?.idToken ?? response.params?.id_token;
+      if (!idToken) {
+        if (isMounted) {
+          setIsPending(false);
+          Alert.alert('Sign-in failed', 'Google did not return a token. Please try again.');
+        }
+        return;
+      }
+
+      try {
+        const result = await authService.socialAuth({ provider: 'google', id_token: idToken });
+        if (isMounted) await onSignIn(result);
+      } catch {
+        if (isMounted) {
+          Alert.alert('Sign-in failed', 'Could not sign in with Google. Please try again.');
+        }
+      } finally {
+        if (isMounted) setIsPending(false);
+      }
+    };
+
+    completeGoogleSignIn();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [onSignIn, response]);
+
+  const handlePress = async () => {
+    if (IS_EXPO_GO) {
+      Alert.alert(
+        'Google sign-in needs a development build',
+        'Expo Go uses an exp:// redirect that Google blocks. Run the iOS app with a development or standalone build to test Google sign-in.',
+      );
+      return;
+    }
+    if (!request) return;
+    setIsPending(true);
+    try {
+      const result = await promptAsync();
+      if (result.type === 'cancel' || result.type === 'dismiss') setIsPending(false);
     } catch {
       Alert.alert('Sign-in failed', 'Could not sign in with Google. Please try again.');
-    } finally {
       setIsPending(false);
     }
   };
@@ -108,7 +158,7 @@ function GoogleSignInButton({ onSignIn }: GoogleBtnProps) {
     <Pressable
       style={({ pressed }) => [styles.socialBtn, pressed && styles.socialBtnPressed]}
       onPress={handlePress}
-      disabled={isPending}
+      disabled={isPending || !request}
     >
       {isPending ? (
         <ActivityIndicator size="small" color={C.socialText} />
@@ -164,7 +214,7 @@ export default function LoginScreen({ navigation }: Props) {
     }
   };
 
-  const persistAndSetAuth = async (result: SocialAuthTokens) => {
+  const persistAndSetAuth = useCallback(async (result: SocialAuthTokens) => {
     await authStorage.setTokens(result.access_token, result.refresh_token);
     const user = {
       id: result.user.id,
@@ -181,7 +231,7 @@ export default function LoginScreen({ navigation }: Props) {
       isProfileComplete: result.is_profile_complete,
     });
     if (!result.is_profile_complete) navigation.replace('ProfileSetup');
-  };
+  }, [navigation, setAuth]);
 
   const handleAppleSignIn = async () => {
     setAppleIsPending(true);

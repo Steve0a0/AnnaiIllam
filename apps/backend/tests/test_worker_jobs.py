@@ -24,7 +24,6 @@ from app.core.statuses import RequirementStatus
 from app.models.assignment import Assignment
 from app.models.client_profile import ClientProfile
 from app.models.requirement import Requirement
-from app.models.user import User
 from app.models.worker_profile import WorkerProfile
 from app.services.token_service import build_token_pair
 

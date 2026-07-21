@@ -1,7 +1,7 @@
 import secrets
 from urllib.parse import urlparse
 
-from app.utils.time import utcnow
+from app.utils.time import utcnow, business_today
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -153,7 +153,7 @@ def worker_check_in(
         raise HTTPException(status_code=400, detail="Assignment is not active for attendance")
 
     # ── Date window check ────────────────────────────────────────────────────
-    today = utcnow().date()
+    today = business_today()
     if assignment.start_date and today < assignment.start_date:
         raise HTTPException(
             status_code=400,
@@ -397,7 +397,7 @@ def worker_report_half_day(
     if assignment.worker_profile_id != worker_profile.id:
         raise HTTPException(status_code=403, detail="You cannot report attendance for this assignment")
 
-    today = utcnow().date()
+    today = business_today()
     existing = get_attendance_for_assignment_on_date(db, assignment.id, today)
     if existing:
         raise HTTPException(status_code=400, detail="Attendance already recorded for today")

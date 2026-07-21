@@ -1,0 +1,5 @@
+# conftest.py must set os.environ (DATABASE_URL, APP_ENV, …) BEFORE importing
+# the app, so its imports intentionally sit below that setup. Exempt only that
+# file from E402 rather than reordering and breaking test bootstrap.
+[lint.per-file-ignores]
+"tests/conftest.py" = ["E402"]

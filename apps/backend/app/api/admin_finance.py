@@ -3,12 +3,10 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies.roles import require_permission_group, require_role
 from app.api.dependencies.scoping import get_accessible_client_ids
-from app.core.payment_constants import ClientPaymentStatus, PaymentModel, WorkerPayoutStatus
+from app.core.payment_constants import ClientPaymentStatus, WorkerPayoutStatus
 from app.core.payroll_constants import PayrollItemPaymentStatus
 from app.core.roles import UserRole
-from app.core.statuses import RequirementStatus, validate_requirement_transition
 from app.db.deps import get_db
-from app.models.user import User
 from app.models.user import User
 from app.repositories.payment_repository import (
     create_client_payment,
@@ -28,6 +26,7 @@ from app.repositories.payroll_repository import (
 )
 from app.repositories.profile_repository import get_worker_profile_by_id
 from app.repositories.requirement_repository import get_requirement_by_id
+from app.repositories.quote_repository import get_quote_by_requirement_id
 from app.models.client_payment import ClientPayment
 from app.schemas.payment import (
     CreateWorkerPayoutSchema,
@@ -37,6 +36,10 @@ from app.schemas.payment import (
     UpdateWorkerPayoutStatusSchema,
 )
 from app.services.payment_service import build_manual_client_payment, build_worker_payout
+from app.services.payment_ledger_service import (
+    PaymentLedgerError,
+    validate_manual_payment,
+)
 from app.services.notification_service import enqueue_push_to_user
 from app.utils.audit import audit_event
 from app.utils.response import success_response
@@ -55,10 +58,6 @@ def record_manual_client_payment(
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
 
-    allowed_models = {item.value for item in PaymentModel}
-    if payload.payment_model not in allowed_models:
-        raise HTTPException(status_code=400, detail="Invalid payment model")
-
     allowed_statuses = {
         ClientPaymentStatus.PENDING.value,
         ClientPaymentStatus.PAID.value,
@@ -68,13 +67,27 @@ def record_manual_client_payment(
     if payload.payment_status not in allowed_statuses:
         raise HTTPException(status_code=400, detail="Invalid payment status")
 
+    quote = get_quote_by_requirement_id(db, requirement.id)
+    payments = get_client_payments_by_requirement_id(db, requirement.id)
+    try:
+        validate_manual_payment(
+            requirement,
+            quote,
+            payments,
+            amount=payload.amount,
+            purpose=payload.purpose,
+        )
+    except PaymentLedgerError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     payment = build_manual_client_payment(
         client_id=requirement.client_id,
         requirement_id=requirement.id,
         amount=payload.amount,
-        payment_model=payload.payment_model,
+        payment_model=quote.payment_model,
         payment_mode=payload.payment_mode,
         payment_status=payload.payment_status,
+        purpose=payload.purpose,
         recorded_by_user_id=current_user.id,
         reference_note=payload.reference_note,
     )
@@ -97,6 +110,7 @@ def record_manual_client_payment(
         {
             "payment_id": payment.id,
             "status": payment.payment_status,
+            "purpose": payment.purpose,
         },
     )
 
@@ -130,7 +144,6 @@ def list_all_client_payments(
     client_ids = {p.client_id for p in payments}
 
     from sqlalchemy import select as sa_select
-    from app.models.quote import Quote
 
     reqs = {}
     if req_ids:
@@ -138,13 +151,6 @@ def list_all_client_payments(
             sa_select(Requirement).where(Requirement.id.in_(req_ids))
         ).scalars().all():
             reqs[r.id] = r
-
-    quotes = {}
-    if req_ids:
-        for q in db.execute(
-            sa_select(Quote).where(Quote.requirement_id.in_(req_ids))
-        ).scalars().all():
-            quotes[q.requirement_id] = q
 
     profiles = {}
     if client_ids:
@@ -157,11 +163,10 @@ def list_all_client_payments(
     for p in payments:
         req = reqs.get(p.requirement_id)
         profile = profiles.get(p.client_id)
-        quote = quotes.get(p.requirement_id)
         client_name = (
             (profile.company_name or profile.contact_name) if profile else f"Client #{p.client_id}"
         )
-        is_advance = bool(quote and (quote.advance_amount or 0) > 0)
+        is_advance = p.purpose == "advance"
         data.append({
             "id": p.id,
             "client_id": p.client_id,
@@ -171,6 +176,7 @@ def list_all_client_payments(
             "requirement_city": req.city if req else None,
             "requirement_state": req.state if req else None,
             "amount": p.amount,
+            "purpose": p.purpose,
             "payment_model": p.payment_model,
             "payment_mode": p.payment_mode,
             "payment_status": p.payment_status,
@@ -202,6 +208,7 @@ def list_admin_client_payments_for_requirement(
             "client_id": item.client_id,
             "requirement_id": item.requirement_id,
             "amount": item.amount,
+            "purpose": item.purpose,
             "payment_model": item.payment_model,
             "payment_mode": item.payment_mode,
             "payment_status": item.payment_status,
@@ -223,9 +230,7 @@ def update_client_payment_status(
     current_user: User = Depends(require_permission_group("finance_admin")),
     db: Session = Depends(get_db),
 ):
-    """Admin verifies a reference (UTR) payment and marks it paid or failed.
-    When marking paid: if the linked requirement is 'approved' and its quote has an
-    advance_amount, the requirement is auto-transitioned to 'assigned'."""
+    """Verify a reference payment without changing operational requirement state."""
     payment = get_client_payment_by_id(db, payment_id)
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
@@ -236,62 +241,33 @@ def update_client_payment_status(
     if old_status == new_status:
         return success_response("No change", {"payment_id": payment.id, "status": new_status})
 
+    if new_status == ClientPaymentStatus.PAID.value:
+        requirement = get_requirement_by_id(db, payment.requirement_id)
+        quote = get_quote_by_requirement_id(db, payment.requirement_id)
+        if not requirement:
+            raise HTTPException(status_code=404, detail="Requirement not found")
+        other_payments = [
+            item
+            for item in get_client_payments_by_requirement_id(db, payment.requirement_id)
+            if item.id != payment.id
+        ]
+        try:
+            validate_manual_payment(
+                requirement,
+                quote,
+                other_payments,
+                amount=payment.amount,
+                purpose=payment.purpose,
+            )
+        except PaymentLedgerError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     payment.payment_status = new_status
     if new_status == ClientPaymentStatus.PAID.value and not payment.paid_at:
         payment.paid_at = utcnow()
 
     requirement_transitioned = False
     new_requirement_status = None
-
-    # Auto-advance requirement: approved → assigned when advance is confirmed
-    # Also: in_progress → completed when full balance is collected
-    if new_status == ClientPaymentStatus.PAID.value:
-        requirement = get_requirement_by_id(db, payment.requirement_id)
-        if requirement:
-            from app.models.quote import Quote
-            from sqlalchemy import select as sa_select
-            quote_stmt = sa_select(Quote).where(Quote.requirement_id == requirement.id)
-            quote = db.execute(quote_stmt).scalar_one_or_none()
-
-            if requirement.status == RequirementStatus.APPROVED.value:
-                if quote and (quote.advance_amount or 0) > 0:
-                    # Validate payment covers the advance amount before unlocking assignment
-                    if payment.amount < quote.advance_amount:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=(
-                                f"Payment amount ({payment.amount}) does not cover "
-                                f"the required advance ({quote.advance_amount}). "
-                                "Record the correct amount or split payments to reach the advance threshold."
-                            ),
-                        )
-                    try:
-                        validate_requirement_transition(
-                            requirement.status, RequirementStatus.WORKERS_ASSIGNED.value
-                        )
-                    except ValueError as exc:
-                        raise HTTPException(status_code=400, detail=str(exc)) from exc
-                    requirement.status = RequirementStatus.WORKERS_ASSIGNED.value
-                    requirement_transitioned = True
-                    new_requirement_status = RequirementStatus.WORKERS_ASSIGNED.value
-
-            elif requirement.status == RequirementStatus.IN_PROGRESS.value:
-                if quote and (quote.quoted_amount or 0) > 0:
-                    all_payments = get_client_payments_by_requirement_id(db, requirement.id)
-                    total_paid = sum(
-                        p.amount for p in all_payments
-                        if p.payment_status == ClientPaymentStatus.PAID.value
-                    )
-                    if total_paid >= quote.quoted_amount:
-                        try:
-                            validate_requirement_transition(
-                                requirement.status, RequirementStatus.COMPLETED.value
-                            )
-                        except ValueError as exc:
-                            raise HTTPException(status_code=400, detail=str(exc)) from exc
-                        requirement.status = RequirementStatus.COMPLETED.value
-                        requirement_transitioned = True
-                        new_requirement_status = RequirementStatus.COMPLETED.value
 
     db.commit()
 

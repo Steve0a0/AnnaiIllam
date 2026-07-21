@@ -7,6 +7,7 @@ export const C = {
   ink: '#1C1917',
   body: '#44403C',
   muted: '#78716C',
+  neutralBg: '#F5F5F4',
   border: '#E7E5E4',
   brand: '#1A6640',
   brandDark: '#0D2E1E',

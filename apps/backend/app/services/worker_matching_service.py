@@ -1,4 +1,4 @@
-﻿from datetime import date, timedelta
+﻿from datetime import timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,7 +12,7 @@ from app.models.worker_interest import WorkerInterest
 from app.repositories.assignment_repository import get_active_assignments_by_worker_profile_id
 from app.repositories.profile_repository import get_all_worker_profiles
 from app.repositories.requirement_repository import get_requirement_by_id
-from app.repositories.worker_availability_repository import get_worker_availability
+from app.utils.time import business_today
 
 ASSIGNABLE_VERIFICATION_STATUSES = {"approved", "verified"}
 _ACTIVE_STATUSES = [
@@ -120,7 +120,7 @@ def detect_worker_conflict(db: Session, worker_profile_id: int, requirement) -> 
 
 def get_expired_documents(db: Session, worker_profile_id: int) -> list[dict]:
     """Returns non-rejected documents whose expiry_date is strictly before today."""
-    today = date.today()
+    today = business_today()
     rows = db.execute(
         select(WorkerDocument).where(
             WorkerDocument.worker_profile_id == worker_profile_id,
@@ -325,7 +325,7 @@ def get_worker_matches(db: Session, requirement) -> list[dict]:
 
     # 7. Batch-load expired documents for all workers (single query).
     docs_map: dict[int, list[dict]] = {}
-    today = date.today()
+    today = business_today()
     for doc in db.execute(
         select(WorkerDocument).where(
             WorkerDocument.worker_profile_id.in_(worker_ids),

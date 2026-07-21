@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import timedelta
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy import func, select
@@ -23,7 +23,6 @@ from app.repositories.rating_repository import get_client_rating_for_requirement
 from app.repositories.requirement_repository import (
     create_requirement,
     get_requirement_by_id,
-    get_requirements_by_client_id,
     get_requirements_by_client_id_paginated_stmt,
 )
 from app.utils.pagination import PaginationParams, paginate, pagination_meta
@@ -31,8 +30,10 @@ from app.schemas.quote import QuoteDecisionSchema
 from app.schemas.rating import ClientRatingCreateSchema
 from app.schemas.requirement import RequirementCreateSchema
 from app.services.notification_service import enqueue_push_to_user, queue_notification
+from app.services.payment_ledger_service import build_payment_ledger
 from app.services.requirement_service import build_requirement_entity
 from app.utils.audit import audit_event
+from app.utils.time import business_today
 from app.utils.response import success_response
 
 router = APIRouter(prefix="/client/requirements", tags=["Client Requirements"])
@@ -113,18 +114,15 @@ def list_my_requirements(
 
     # Batch-fetch quotes, paid payments, and ratings — no N+1 queries
     quotes: dict[int, Quote] = {}
-    paid_totals: dict[int, int] = {}
+    payments_by_requirement: dict[int, list[ClientPayment]] = {}
     rated_req_ids: set[int] = set()
     if req_ids:
         for q in db.execute(select(Quote).where(Quote.requirement_id.in_(req_ids))).scalars().all():
             quotes[q.requirement_id] = q
         for p in db.execute(
-            select(ClientPayment).where(
-                ClientPayment.requirement_id.in_(req_ids),
-                ClientPayment.payment_status == "paid",
-            )
+            select(ClientPayment).where(ClientPayment.requirement_id.in_(req_ids))
         ).scalars().all():
-            paid_totals[p.requirement_id] = paid_totals.get(p.requirement_id, 0) + p.amount
+            payments_by_requirement.setdefault(p.requirement_id, []).append(p)
         for cr in db.execute(
             select(ClientRating).where(
                 ClientRating.requirement_id.in_(req_ids),
@@ -139,7 +137,10 @@ def list_my_requirements(
         quote = quotes.get(item.id)
         if not quote or quote.payment_model == "client_pays_worker_directly":
             return None
-        balance = max(0, (quote.quoted_amount or 0) - paid_totals.get(item.id, 0))
+        balance = build_payment_ledger(
+            quote,
+            payments_by_requirement.get(item.id, []),
+        ).outstanding_balance
         return balance if balance > 0 else None
 
     data = [
@@ -386,7 +387,7 @@ def decide_quote(
 
     # Inline expiry: only the approve action is blocked when the quote has passed valid_until.
     # The reject action is still allowed so the client can signal they don't want the expired quote.
-    if payload.action == "approve" and quote.valid_until is not None and date.today() > quote.valid_until:
+    if payload.action == "approve" and quote.valid_until is not None and business_today() > quote.valid_until:
         quote.status = QuoteStatus.EXPIRED.value
         quote.updated_by_user_id = current_user.id
         try:

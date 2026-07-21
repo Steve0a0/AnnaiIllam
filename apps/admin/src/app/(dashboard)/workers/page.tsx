@@ -546,6 +546,8 @@ function WorkerReviewPanel({
   isTogglingAvailability: boolean;
   openingDocumentId: number | null;
 }) {
+  const queryClient = useQueryClient();
+
   if (!worker) {
     return (
       <Card className="border-border bg-white shadow-sm">

@@ -7,9 +7,9 @@ import pytest
 from app.core.assignment_constants import AssignmentStatus
 from app.core.payment_constants import ClientPaymentStatus, PaymentModel
 from app.core.statuses import RequirementStatus
-from app.models.audit_log import AuditLog
 from app.models.client_payment import ClientPayment
 from app.models.client_profile import ClientProfile
+from app.models.quote import Quote
 from app.models.requirement import Requirement
 from app.models.user import User
 from app.models.worker_profile import WorkerProfile
@@ -36,7 +36,7 @@ def client_profile(db, client_user):
 
 
 @pytest.fixture
-def approved_requirement(db, client_profile, client_user):
+def approved_requirement(db, client_profile, client_user, admin_user):
     requirement = Requirement(
         client_id=client_profile.id,
         category="Security",
@@ -58,6 +58,17 @@ def approved_requirement(db, client_profile, client_user):
     db.add(requirement)
     db.commit()
     db.refresh(requirement)
+    db.add(
+        Quote(
+            requirement_id=requirement.id,
+            quoted_amount=30000,
+            advance_amount=5000,
+            payment_model=PaymentModel.CLIENT_PAYS_COMPANY.value,
+            status="approved",
+            created_by_user_id=admin_user.id,
+        )
+    )
+    db.commit()
     return requirement
 
 
@@ -339,7 +350,7 @@ class TestAdminAssignmentFlow:
             headers=admin_headers,
         )
         assert response.status_code == 400
-        assert "no confirmed payment" in response.json()["message"].lower()
+        assert "confirmed advance" in response.json()["message"].lower()
 
     def test_assignment_create_requires_available_approved_worker(
         self,
@@ -607,7 +618,6 @@ class TestWorkerCapacityEnforcement:
         worker_profile,
         other_worker_profile,
     ):
-        from app.models.assignment import Assignment
 
         # Assign first worker
         assignment_id = create_assignment(
@@ -754,7 +764,7 @@ class TestPaymentGateBypass:
             headers=admin_headers,
         )
         assert response.status_code == 400
-        assert "no confirmed payment" in response.json()["message"].lower()
+        assert "confirmed advance" in response.json()["message"].lower()
 
 
 class TestPaymentGateBypassAudit:

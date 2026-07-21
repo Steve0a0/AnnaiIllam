@@ -1,0 +1,123 @@
+name: Security CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+      - production-hardening
+  workflow_dispatch:
+
+concurrency:
+  group: security-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  security-events: write
+
+jobs:
+  repository-scan:
+    name: Dependency, secret, and configuration scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan repository
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
+
+  dependency-review:
+    name: Pull request dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@v5
+        with:
+          # Block only on high/critical advisories in newly-added deps.
+          # Moderate advisories (e.g. transitive dev tooling) are noise here.
+          fail-on-severity: high
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - python
+          - javascript-typescript
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+
+  backend-image:
+    name: Backend container image scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build --tag annai-backend:ci apps/backend
+
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type: image
+          image-ref: annai-backend:ci
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          # Report-only: base-image (Debian/Alpine) CVEs are upstream and not
+          # ours to fix — they land here whenever the base image lags a patch.
+          # Secrets/misconfig in our own code stay blocking via repository-scan.
+          exit-code: '0'
+          format: table
+
+  admin-image:
+    name: Admin container image scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build admin image
+        run: docker build --build-arg NEXT_PUBLIC_API_BASE_URL=https://api.example.invalid/api/v1 --tag annai-admin:ci apps/admin
+
+      - name: Scan admin image
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type: image
+          image-ref: annai-admin:ci
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          # Report-only — see backend-image note. Upstream base-image CVEs
+          # must not block merges; our own code is covered by repository-scan.
+          exit-code: '0'
+          format: table

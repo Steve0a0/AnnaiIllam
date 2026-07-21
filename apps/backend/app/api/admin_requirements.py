@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import timedelta
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -31,8 +31,10 @@ from app.repositories.requirement_repository import (
 from app.schemas.quote import QuoteCreateSchema
 from app.services.notification_service import enqueue_push_to_user
 from app.services.quote_service import build_quote_entity
+from app.services.payment_ledger_service import calculate_quote_total
 from app.utils.audit import audit_event
 from app.utils.pagination import PaginationParams, paginate, pagination_meta
+from app.utils.time import business_today
 from app.utils.response import success_response
 
 router = APIRouter(prefix="/admin/requirements", tags=["Admin Requirements"])
@@ -248,10 +250,10 @@ def create_admin_quote(
     # If rate_per_worker is supplied, recompute the expected total and override
     # any tampered or miscalculated quoted_amount the frontend may have sent.
     if payload.rate_per_worker:
-        expected_amount = (
-            payload.rate_per_worker
-            * requirement.number_of_workers
-            * requirement.duration_days
+        expected_amount = calculate_quote_total(
+            payload.rate_per_worker,
+            requirement.number_of_workers,
+            requirement.duration_days,
         )
         if quote.quoted_amount != expected_amount:
             discrepancy_pct = (
@@ -593,7 +595,7 @@ def request_extension(
         quote_type="extension",
         extension_days=payload.additional_days,
         status=QuoteStatus.SENT.value,
-        valid_until=date.today() + timedelta(days=7),
+        valid_until=business_today() + timedelta(days=7),
         created_by_user_id=current_user.id,
     )
     create_quote(db, extension_quote)

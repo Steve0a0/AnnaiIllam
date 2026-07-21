@@ -9,7 +9,6 @@ Covers:
 from datetime import date, timedelta
 from unittest.mock import patch
 
-import pytest
 
 from app.core.scheduler import check_unclosed_checkins
 from app.models.assignment import Assignment
@@ -133,7 +132,7 @@ def test_checked_out_worker_not_alerted(mock_push, db, client_user, admin_user, 
         hours_since_checkin=11, check_out=True,
     )
 
-    result = check_unclosed_checkins(db)
+    check_unclosed_checkins(db)
 
     db.refresh(attendance)
     assert attendance.last_alert_sent_at is None
@@ -178,7 +177,7 @@ def test_recent_checkin_not_alerted(mock_push, db, client_user, admin_user, work
         hours_since_checkin=5, check_out=False,
     )
 
-    result = check_unclosed_checkins(db)
+    check_unclosed_checkins(db)
 
     db.refresh(attendance)
     assert attendance.last_alert_sent_at is None

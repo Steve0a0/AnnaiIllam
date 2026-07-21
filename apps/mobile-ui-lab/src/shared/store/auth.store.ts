@@ -31,6 +31,7 @@ type AuthState = {
   setOnboardingStep:     (step: string | null) => void;
   setProfileComplete:    (value: boolean)       => void;
   setBiometricSetupDone: (value: boolean)       => void;
+  updateUser:            (patch: Partial<MobileUser>) => void;
   clearAuth:             ()                     => void;
 };
 
@@ -52,6 +53,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   setOnboardingStep:     (step)  => set({ onboardingStep: step }),
   setProfileComplete:    (value) => set({ isProfileComplete: value }),
   setBiometricSetupDone: (value) => set({ biometricSetupDone: value }),
+  updateUser:            (patch) => set((state) => ({
+    user: state.user ? { ...state.user, ...patch } : state.user,
+  })),
 
   clearAuth: () =>
     set({

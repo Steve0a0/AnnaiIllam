@@ -43,7 +43,6 @@ from app.models.quote import Quote
 from app.models.requirement import Requirement
 from app.models.user import User
 from app.models.worker_profile import WorkerProfile
-from app.utils.time import utcnow
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -310,7 +309,6 @@ def _seed_assignments(
 
 def _seed_attendance(db: Session, assignments: list[Assignment], worker_profiles: list[WorkerProfile]) -> None:
     print(f"  Creating {N_ATTENDANCE} attendance records…")
-    worker_map = {wp.id: wp for wp in worker_profiles}
     active_assignments = [a for a in assignments if a.status in {"active", "completed"}]
     if not active_assignments:
         active_assignments = assignments
@@ -421,7 +419,6 @@ def _seed_payments(
     admin_user: User,
 ) -> None:
     print(f"  Creating {N_PAYMENTS} client payments…")
-    client_map = {cp.id: cp for cp in client_profiles}
     payable_reqs = [r for r in requirements if r.status in {"quoted", "approved", "workers_assigned", "in_progress", "completed"}]
     if not payable_reqs:
         payable_reqs = requirements

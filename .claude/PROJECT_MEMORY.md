@@ -22,6 +22,7 @@
 - Redis production connectivity can be verified with `cd apps/backend && python -m scripts.check_redis`; it redacts credentials and checks ping plus temporary TTL write/read/delete.
 - `apps/mobile-ui-lab/.env` was recreated after a corrupt 330 MB file caused `serve.ps1` to run out of memory. A backup exists as `.env.corrupt-20260508`.
 - Use `MVP_IMPLEMENTATION_TRACKER.md` for current status, blockers, next queue, and Jira-style MVP project tracking.
+- `GET /api/v1/users` is restricted to `super_admin`, returns a paginated minimal directory without phone/email/name, and is covered by `apps/backend/tests/test_users.py`, including a router-wide authentication regression test.
 - Feature 3 (Worker Replacement) done: `POST /admin/assignments/{id}/replace` in `admin_assignments.py`. New columns `replacement_reason` + `replaced_by_assignment_id` on `Assignment` model; migration `y1z2a3b4c5d6`. Tests in `tests/test_worker_replacement.py` (8 tests). Duplicate-assignment check runs BEFORE availability check (order matters — assigned worker is unavailable by design).
 
 ## Backend Architecture (audited 2026-05-08)
@@ -52,6 +53,7 @@
 - Expo SDK 54, React Native 0.81.5, React 19, New Architecture enabled.
 - App variant selected by `EXPO_PUBLIC_APP_VARIANT` env var (`client` | `worker`). Entry: `App.tsx` → `ClientApp` or `WorkerApp`.
 - Scripts: `npm run clients` or `npm run worker` to start each variant.
+- Google sign-in uses `expo-auth-session/providers/google`; native redirects use the app bundle/package scheme (`com.annaiillam:/oauthredirect`), so `apps/mobile-ui-lab/app.json` must register `com.annaiillam` alongside the public `annai-illam` scheme.
 - Secure token storage via `expo-secure-store`. Keys prefixed: `client_*` vs `worker_*`.
 - Worker app has biometric (Face ID/Touch ID) per-session auth via `expo-local-authentication`.
 - Worker onboarding is multi-stage: phone OTP → consent → ID/selfie S3 upload → build profile → under review (admin approves) → biometric setup → app.
@@ -156,7 +158,7 @@ Four core-flow bugs fixed as part of a structured audit. 111 backend tests pass 
 
 - **Fix 1 — `canCreateQuote` re-quote gate** (`apps/admin/src/features/requirements/requirement-detail-view.tsx:93`): Changed condition from `!requirement.quote` to `!requirement.quote || ["rejected","expired"].includes(requirement.quote.status)`. Unblocks admin re-quoting after a client rejects the first quote.
 - **Fix 2 — Mobile timeline status mismatch** (`apps/mobile-ui-lab/src/apps/client/screens/RequestDetailScreen.tsx:33`): Changed `"assigned"` to `"workers_assigned"` in the timeline array. Requirement progress indicator was stuck at "Approved" forever after workers were assigned.
-- **Fix 3 — Payment auto-transition bypassed state machine** (`apps/backend/app/api/admin_finance.py:239-255`): Added `validate_requirement_transition()` calls before setting `workers_assigned` or `completed`. Added advance-amount check: payment must be ≥ `quote.advance_amount` before unlocking worker assignment. Import added: `validate_requirement_transition` from `app.core.statuses`. Tests in `tests/test_payment_transitions.py` (7 tests).
+- **Fix 3 superseded by PROD-004 (2026-07-20)**: Payment confirmation never changes operational requirement state. Aggregate confirmed advance unlocks the assignment API; Operations/Admin owns assignment and completion transitions. Tests live in `tests/test_payment_transitions.py`.
 - **Fix 4 — Half-day attendance never set `in_progress`** (`apps/backend/app/api/worker_attendance.py:281-333`): Added same assignment-activation + requirement lifecycle block that `worker_check_in` uses. Jobs where workers only use half-day reporting can now reach `completed`. Tests appended to `tests/test_attendance.py` as `TestHalfDayLifecycleTrigger` (5 tests).
 
 ## Flow Bug Fixes — Priority 2 (fixed 2026-05-28)
@@ -165,7 +167,27 @@ Four core-flow bugs fixed as part of a structured audit. 111 backend tests pass 
 - **Fix 6 — Worker decline reverts requirement without state machine** (`worker_assignments.py:117-118`): Wrapped `requirement.status = APPROVED` with `validate_requirement_transition()` + try/except HTTPException. Tests: `TestWorkerDeclineStateMachineGuard` in `test_assignments.py` (2 tests).
 - **Fix 7 — `salary_amount` leaked to client** (`client_requirements.py:210`): Removed `salary_amount` from client-facing assignment projection. Also removed from `ClientRequirementDetail` TypeScript type in `apps/mobile-ui-lab/src/shared/services/client-requirements.service.ts`. Tests: `TestClientRequirementDetailSalaryLeakage` in `test_requirements.py` (1 test).
 - **Fix 8 — Assignment status update had no transition validation** (`admin_assignments.py:309-386`): Added `ASSIGNMENT_TRANSITIONS` dict and `validate_assignment_transition()` to `app/core/assignment_constants.py`. Imported and called in `update_assignment_status()`. Terminal states (completed, cancelled, replaced) cannot be exited. Tests: `TestAssignmentStatusTransitionGuard` in `test_assignments.py` (4 tests).
-- **Fix 9 — Payment amount not validated against advance_amount**: Already done in Priority 1 Fix 3. Covered by `test_payment_transitions.py`.
+- **Fix 9 superseded by PROD-004**: `payment_ledger_service.py` calculates aggregate advance due and the assignment API enforces it.
+
+## PROD-004 Payment Ledger (2026-07-20)
+
+- Client quote/payment APIs use integer whole INR rupees; Razorpay converts to paise only at its adapter boundary.
+- `app/services/payment_ledger_service.py` owns quote total, advance, paid, refund, outstanding, and overpayment calculations.
+- Client amount/payment-model fields are compatibility hints only and never authoritative.
+- Payment purposes are advance, balance, adjustment, and refund.
+- Product and Finance approval of `docs/PAYMENT_LEDGER.md` is still required before PROD-004 can be DONE.
+
+## PROD-019 / PROD-020 Release Gates (2026-07-21)
+
+- Admin ESLint passes with 0 errors; 8 warnings remain non-blocking.
+- Admin tests pass 25/25 and the Next.js production build completes.
+- Mobile TypeScript passes and mobile tests pass 11/11.
+- Backend dependency audit passes with no known vulnerabilities after upgrading the coupled FastAPI/Starlette and pytest/pytest-asyncio dependency sets; the full backend suite passes 782/782 tests.
+- FastAPI 0.139 uses lazy included routers. Router-wide security tests must inspect each included router's `effective_route_contexts()` as well as direct `APIRoute` entries.
+- Admin build fixes include a stable React Query timestamp for requirement age,
+  local `useQueryClient()` initialization in `WorkerReviewPanel`, and
+  `worker_daily_rate` in `CreateQuotePayload`.
+- Mobile `clientStyles.C` now defines the semantic `neutralBg` token.
 - **Fix 10 — Worker phone update had no uniqueness check** (`admin_people.py:755-759`): Added `get_user_by_phone` lookup before setting new phone; raises HTTP 409 if another account already uses it. Phone is `.strip()`-normalised before comparison. Tests: `TestWorkerPhoneUniqueness` in `tests/test_people.py` (4 tests).
 
 ## Admin Clients Page (implemented 2026-05-08)

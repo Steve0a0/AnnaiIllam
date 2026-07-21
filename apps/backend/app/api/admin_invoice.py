@@ -18,7 +18,7 @@ from app.services.notification_service import enqueue_push_to_user
 from app.utils.audit import audit_event
 from app.utils.pagination import PaginationParams, paginate, pagination_meta
 from app.utils.response import success_response
-from app.utils.time import utcnow
+from app.utils.time import utcnow, business_today
 
 router = APIRouter(prefix="/admin/invoices", tags=["Admin Invoices"])
 
@@ -109,7 +109,7 @@ def generate_invoice(
     gst_rate = payload.gst_rate
     gst_amount = round(subtotal * gst_rate / 100)
     total_amount = subtotal + gst_amount
-    due_date = utcnow().date() + timedelta(days=30)
+    due_date = business_today() + timedelta(days=30)
 
     invoice = Invoice(
         invoice_number=invoice_number,

@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -21,6 +21,7 @@ from app.schemas.profile import (
 from app.services.profile_service import build_worker_document, build_worker_profile
 from app.utils.audit import audit_event
 from app.utils.response import success_response
+from app.utils.time import business_today
 
 router = APIRouter(prefix="/worker/profile", tags=["Worker Profile"])
 
@@ -174,7 +175,7 @@ def list_my_document_reminders(
     if not profile:
         raise HTTPException(status_code=404, detail="Worker profile not found")
 
-    today = date.today()
+    today = business_today()
     threshold = today + timedelta(days=days)
     documents = get_worker_documents_by_profile_id(db, profile.id)
 

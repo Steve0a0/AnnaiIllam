@@ -397,11 +397,15 @@ function EditSheet({ profile, visible, onClose, onSaved }: {
 /* Add Phone Sheet */
 const OTP_LENGTH = 6;
 
-function AddPhoneSheet({ visible, onClose, onSaved }: {
+export function AddPhoneSheet({ visible, onClose, onSaved, required = false, title, subtitle }: {
   visible: boolean;
   onClose: () => void;
   onSaved: () => void;
+  required?: boolean;
+  title?: string;
+  subtitle?: string;
 }) {
+  const { user, updateUser } = useAuthStore();
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
@@ -462,7 +466,12 @@ function AddPhoneSheet({ visible, onClose, onSaved }: {
     Keyboard.dismiss();
     setIsPending(true);
     try {
-      await clientPhoneService.verify(phone.trim(), code);
+      const result = await clientPhoneService.verify(phone.trim(), code);
+      if (user) {
+        const updatedUser = { ...user, phone: result.phone };
+        await authStorage.setUser(updatedUser);
+        updateUser({ phone: result.phone });
+      }
       onSaved();
     } catch (err) {
       Alert.alert('Error', getApiError(err, 'Invalid OTP. Please try again.'));
@@ -487,24 +496,31 @@ function AddPhoneSheet({ visible, onClose, onSaved }: {
   };
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={required ? undefined : onClose}
+    >
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={ph.root}>
           <View style={ph.handle} />
           <View style={ph.header}>
             <Text style={ph.headerTitle}>
-              {step === 'phone' ? 'Add phone number' : 'Verify your number'}
+              {step === 'phone' ? title ?? 'Add phone number' : 'Verify your number'}
             </Text>
-            <Pressable onPress={onClose} style={ph.closeBtn}>
-              <X size={18} color={C.body} />
-            </Pressable>
+            {!required ? (
+              <Pressable onPress={onClose} style={ph.closeBtn}>
+                <X size={18} color={C.body} />
+              </Pressable>
+            ) : null}
           </View>
 
           <View style={ph.body}>
             {step === 'phone' ? (
               <>
                 <Text style={ph.subtitle}>
-                  Enter your mobile number. We will send a 6-digit code to verify it.
+                  {subtitle ?? 'Enter your mobile number. We will send a 6-digit code to verify it.'}
                 </Text>
                 <Text style={clientStyles.fieldLabel}>Phone number</Text>
                 <View style={ph.inputShell}>

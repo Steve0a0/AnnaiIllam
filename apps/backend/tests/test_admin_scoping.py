@@ -9,7 +9,6 @@ Covers:
 """
 from datetime import date
 
-import pytest
 
 from app.models.admin_client_assignment import AdminClientAssignment
 from app.models.admin_profile import AdminProfile

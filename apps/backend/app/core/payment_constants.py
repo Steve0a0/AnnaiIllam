@@ -14,6 +14,13 @@ class ClientPaymentStatus(str, Enum):
     REFUNDED = "refunded"
 
 
+class PaymentPurpose(str, Enum):
+    ADVANCE = "advance"
+    BALANCE = "balance"
+    ADJUSTMENT = "adjustment"
+    REFUND = "refund"
+
+
 class WorkerPayoutStatus(str, Enum):
     PENDING = "pending"
     PROCESSING = "processing"

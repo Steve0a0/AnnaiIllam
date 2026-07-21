@@ -1,7 +1,6 @@
 """Tests for Fix 22: queue_notification must send real SMS via Fast2SMS when channel='sms'."""
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 class TestQueueNotificationSms:

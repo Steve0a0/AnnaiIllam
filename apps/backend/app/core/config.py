@@ -88,6 +88,12 @@ class Settings(BaseSettings):
     # checked in for this many hours without checking out. Default 10 hours.
     max_shift_hours: int = 10
 
+    # Whether THIS process runs the in-process background scheduler.
+    # Set RUN_SCHEDULER=false on API containers when a dedicated scheduler
+    # container runs it instead (see root docker-compose.yml) — this is what
+    # guarantees exactly one scheduler regardless of how many API workers run.
+    run_scheduler: bool = True
+
     # Resend — transactional email (invoices, notifications).
     # Obtain API key from https://resend.com/api-keys
     # Leave empty to disable email sending (local dev).

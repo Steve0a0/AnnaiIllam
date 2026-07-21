@@ -2,8 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.roles import require_permission_group, require_role
-from app.core.roles import UserRole
+from app.api.dependencies.roles import require_permission_group
 from app.db.deps import get_db
 from app.models.otp_code import OtpCode
 from app.models.revoked_access_token import RevokedAccessToken

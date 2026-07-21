@@ -1,6 +1,11 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.core.payment_constants import ClientPaymentStatus, PaymentModel, WorkerPayoutStatus
+from app.core.payment_constants import (
+    ClientPaymentStatus,
+    PaymentModel,
+    PaymentPurpose,
+    WorkerPayoutStatus,
+)
 from app.utils.validators import strip_optional_text, strip_text
 
 
@@ -8,13 +13,17 @@ class CreateClientPaymentOrderSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     requirement_id: int
-    amount: int = Field(ge=1)
-    payment_model: str
+    # Deprecated compatibility hints. The server calculates the authoritative
+    # amount and payment model from the approved quote.
+    amount: int | None = Field(default=None, ge=1)
+    payment_model: str | None = None
     reference_note: str | None = Field(default=None, max_length=1000)
 
     @field_validator("payment_model")
     @classmethod
-    def validate_payment_model(cls, value: str) -> str:
+    def validate_payment_model(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = value.strip().lower()
         if normalized not in {item.value for item in PaymentModel}:
             raise ValueError("Invalid payment model")
@@ -34,6 +43,7 @@ class RecordManualClientPaymentSchema(BaseModel):
     payment_model: str
     payment_mode: str = Field(min_length=2, max_length=50)
     payment_status: str
+    purpose: str = PaymentPurpose.ADJUSTMENT.value
     reference_note: str | None = Field(default=None, max_length=1000)
 
     @field_validator("payment_model")
@@ -58,6 +68,14 @@ class RecordManualClientPaymentSchema(BaseModel):
             raise ValueError("Invalid payment status")
         return normalized
 
+    @field_validator("purpose")
+    @classmethod
+    def validate_purpose(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {item.value for item in PaymentPurpose}:
+            raise ValueError("Invalid payment purpose")
+        return normalized
+
     @field_validator("payment_mode")
     @classmethod
     def clean_payment_mode(cls, value: str) -> str:
@@ -75,14 +93,17 @@ class SubmitReferencePaymentSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     requirement_id: int
-    amount: int = Field(ge=1)
-    payment_model: str
+    # Deprecated compatibility hints; ignored by the server.
+    amount: int | None = Field(default=None, ge=1)
+    payment_model: str | None = None
     payment_mode: str = Field(min_length=2, max_length=50)
     reference_note: str = Field(min_length=3, max_length=500)
 
     @field_validator("payment_model")
     @classmethod
-    def validate_payment_model(cls, value: str) -> str:
+    def validate_payment_model(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = value.strip().lower()
         if normalized not in {item.value for item in PaymentModel}:
             raise ValueError("Invalid payment model")

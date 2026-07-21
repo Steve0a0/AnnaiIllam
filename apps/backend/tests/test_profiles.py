@@ -17,7 +17,6 @@ from datetime import date, timedelta
 import pytest
 
 from app.models.client_profile import ClientProfile
-from app.models.user import User
 from app.models.worker_document import WorkerDocument
 from app.models.worker_profile import WorkerProfile
 from app.services.token_service import build_token_pair

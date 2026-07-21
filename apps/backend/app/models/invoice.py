@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from app.utils.time import utcnow
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import text as sa_text
 
