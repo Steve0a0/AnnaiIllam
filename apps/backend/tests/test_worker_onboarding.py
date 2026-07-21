@@ -99,11 +99,12 @@ def client_headers(db, client_user):
 
 
 @pytest.fixture(autouse=True)
-def _local_storage_mode(monkeypatch):
+def _local_storage_mode(monkeypatch, tmp_path):
     """Force local-filesystem storage (no S3) so onboarding tests are
     deterministic regardless of the developer's .env — this matches CI, which
     configures no S3. is_s3_configured() reads settings.s3_bucket."""
     from app.core.config import settings
+    monkeypatch.setattr(settings, 'local_upload_dir', str(tmp_path / 'uploads'))
     monkeypatch.setattr(settings, "s3_bucket", "")
 
 

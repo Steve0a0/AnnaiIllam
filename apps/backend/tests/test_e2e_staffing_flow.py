@@ -17,10 +17,11 @@ _JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\x
 
 
 @pytest.fixture(autouse=True)
-def _local_storage_mode(monkeypatch):
+def _local_storage_mode(monkeypatch, tmp_path):
     """Force local-filesystem storage (no S3) so this test doesn't depend on the
     developer's .env — matches CI, which configures no S3."""
     from app.core.config import settings
+    monkeypatch.setattr(settings, 'local_upload_dir', str(tmp_path / 'uploads'))
     monkeypatch.setattr(settings, "s3_bucket", "")
 
 
