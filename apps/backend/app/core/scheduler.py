@@ -20,7 +20,7 @@ For multi-process or distributed deployments, migrate to Celery + Redis beat
 
 import asyncio
 import logging
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -42,7 +42,7 @@ from app.models.user import User
 from app.models.worker_profile import WorkerProfile
 from app.services.notification_service import send_push_to_user
 from app.utils.audit import audit_event
-from app.utils.time import utcnow
+from app.utils.time import utcnow, business_today
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ def expire_stale_quotes(db: Session) -> dict:
     Takes a caller-supplied session so it can be called directly in tests.
     Returns {"expired_quotes": N}.
     """
-    today = date.today()
+    today = business_today()
     stale_quotes = db.execute(
         select(Quote)
         .where(Quote.status == QuoteStatus.SENT.value)
@@ -229,7 +229,7 @@ def check_unclosed_checkins(db: Session) -> dict:
     Returns {"unclosed_checkin_alerts": N}.
     """
     now = utcnow()
-    today = date.today()
+    today = business_today()
     cutoff = now - timedelta(hours=settings.max_shift_hours)
 
     candidates = db.execute(
@@ -305,7 +305,7 @@ def flag_no_shows(db: Session) -> dict:
     Takes a caller-supplied session so it can be called directly in tests.
     Returns {"flagged_no_shows": N}.
     """
-    today = date.today()
+    today = business_today()
 
     # Load accepted/active assignments on in_progress requirements that include today.
     # End-date check is done in Python to stay DB-agnostic (no date arithmetic SQL).
@@ -483,6 +483,16 @@ def _spawn_task() -> None:
     global _cleanup_task
     _cleanup_task = asyncio.ensure_future(_cleanup_loop())
     _cleanup_task.add_done_callback(_on_task_done)
+
+
+async def run_scheduler_forever() -> None:
+    """Entry point for the dedicated standalone scheduler process.
+
+    Runs the same cleanup loop the API would, but as its own process/container
+    so exactly one scheduler runs regardless of API worker count.
+    Blocks until cancelled (e.g. SIGTERM on `docker stop`).
+    """
+    await _cleanup_loop()
 
 
 def start_scheduler() -> None:

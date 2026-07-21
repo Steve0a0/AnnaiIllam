@@ -26,6 +26,7 @@ class ClientPayment(Base):
     )
 
     amount: Mapped[int] = mapped_column(Integer)
+    purpose: Mapped[str] = mapped_column(String(50), default="adjustment", index=True)
     payment_model: Mapped[str] = mapped_column(String(50), index=True)
     payment_mode: Mapped[str] = mapped_column(String(50), index=True)
     payment_status: Mapped[str] = mapped_column(String(50), default="pending", index=True)

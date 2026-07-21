@@ -60,13 +60,15 @@ configure_logging(settings.is_local)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Skip background scheduler when running on SQLite (test environment).
-    # The scheduler uses SessionLocal which binds to a separate in-memory DB
-    # instance and would fail with "no such table" errors during tests.
-    if not settings.database_url.startswith("sqlite"):
+    # Run the scheduler only when explicitly enabled AND not on SQLite (tests
+    # bind to a separate in-memory DB and would hit "no such table" errors).
+    # In Docker the scheduler runs as its own container (RUN_SCHEDULER=false on
+    # the API), so API workers never double-run scheduled jobs.
+    scheduler_enabled = settings.run_scheduler and not settings.database_url.startswith("sqlite")
+    if scheduler_enabled:
         start_scheduler()
     yield
-    if not settings.database_url.startswith("sqlite"):
+    if scheduler_enabled:
         stop_scheduler()
 
 

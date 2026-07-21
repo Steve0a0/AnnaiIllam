@@ -10,6 +10,7 @@ def build_client_gateway_payment(
     requirement_id: int,
     amount: int,
     payment_model: str,
+    purpose: str,
     gateway_order_id: str,
     reference_note: str | None = None,
 ) -> ClientPayment:
@@ -17,6 +18,7 @@ def build_client_gateway_payment(
         client_id=client_id,
         requirement_id=requirement_id,
         amount=amount,
+        purpose=purpose,
         payment_model=payment_model,
         payment_mode="gateway",
         payment_status=ClientPaymentStatus.PENDING.value,
@@ -30,6 +32,7 @@ def build_reference_client_payment(
     requirement_id: int,
     amount: int,
     payment_model: str,
+    purpose: str,
     payment_mode: str,
     reference_note: str,
 ) -> ClientPayment:
@@ -38,6 +41,7 @@ def build_reference_client_payment(
         client_id=client_id,
         requirement_id=requirement_id,
         amount=amount,
+        purpose=purpose,
         payment_model=payment_model,
         payment_mode=payment_mode,
         payment_status=ClientPaymentStatus.PENDING.value,
@@ -52,6 +56,7 @@ def build_manual_client_payment(
     payment_model: str,
     payment_mode: str,
     payment_status: str,
+    purpose: str,
     recorded_by_user_id: int,
     reference_note: str | None = None,
 ) -> ClientPayment:
@@ -59,6 +64,7 @@ def build_manual_client_payment(
         client_id=client_id,
         requirement_id=requirement_id,
         amount=amount,
+        purpose=purpose,
         payment_model=payment_model,
         payment_mode=payment_mode,
         payment_status=payment_status,

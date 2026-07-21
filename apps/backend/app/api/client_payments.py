@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies.roles import require_role
 from app.core.config import settings
-from app.core.payment_constants import ClientPaymentStatus, PaymentModel
+from app.core.payment_constants import ClientPaymentStatus
 from app.core.roles import UserRole
 from app.db.deps import get_db
 from app.models.user import User
@@ -19,10 +19,13 @@ from app.repositories.payment_repository import (
 from app.repositories.profile_repository import get_client_profile_by_user_id
 from app.repositories.requirement_repository import get_requirement_by_id
 from app.repositories.quote_repository import get_quote_by_requirement_id
-from app.core.statuses import RequirementStatus
 from app.schemas.payment import CreateClientPaymentOrderSchema, VerifyRazorpayPaymentSchema, SubmitReferencePaymentSchema
 from app.services.notification_service import queue_notification
 from app.services.payment_service import build_client_gateway_payment, build_reference_client_payment, mark_gateway_payment_success
+from app.services.payment_ledger_service import (
+    PaymentLedgerError,
+    derive_client_payment_intent,
+)
 from app.services import razorpay_service
 from app.utils.audit import audit_event
 from app.utils.response import success_response
@@ -105,9 +108,49 @@ def create_client_payment_order(
     if not requirement or requirement.client_id != client_profile.id:
         raise HTTPException(status_code=404, detail="Requirement not found")
 
-    allowed_models = {item.value for item in PaymentModel}
-    if payload.payment_model not in allowed_models:
-        raise HTTPException(status_code=400, detail="Invalid payment model")
+    quote = get_quote_by_requirement_id(db, requirement.id)
+    payments = get_client_payments_by_requirement_id(db, requirement.id)
+    try:
+        intent = derive_client_payment_intent(requirement, quote, payments)
+    except PaymentLedgerError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    matching_pending = next(
+        (
+            payment
+            for payment in payments
+            if payment.payment_status == ClientPaymentStatus.PENDING.value
+            and payment.payment_mode == "gateway"
+            and payment.gateway_order_id
+            and payment.amount == intent.amount
+            and payment.purpose == intent.purpose
+        ),
+        None,
+    )
+    if matching_pending:
+        return success_response(
+            "Existing payment order fetched successfully",
+            {
+                "payment_id": matching_pending.id,
+                "gateway_order_id": matching_pending.gateway_order_id,
+                "amount": matching_pending.amount,
+                "amount_paise": matching_pending.amount * 100,
+                "currency": "INR",
+                "razorpay_key_id": settings.razorpay_key_id,
+                "status": matching_pending.payment_status,
+                "purpose": matching_pending.purpose,
+            },
+        )
+    if any(
+        payment.payment_status == ClientPaymentStatus.PENDING.value
+        and payment.amount == intent.amount
+        and payment.purpose == intent.purpose
+        for payment in payments
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="A matching payment is already pending verification",
+        )
 
     receipt = f"pay_{payload.requirement_id}_{client_profile.id}"
     notes = {
@@ -116,7 +159,7 @@ def create_client_payment_order(
     }
     try:
         rz_order = razorpay_service.create_order(
-            amount_rupees=payload.amount,
+            amount_rupees=intent.amount,
             receipt=receipt,
             notes=notes,
         )
@@ -132,8 +175,9 @@ def create_client_payment_order(
     payment = build_client_gateway_payment(
         client_id=client_profile.id,
         requirement_id=payload.requirement_id,
-        amount=payload.amount,
-        payment_model=payload.payment_model,
+        amount=intent.amount,
+        payment_model=intent.payment_model,
+        purpose=intent.purpose,
         gateway_order_id=gateway_order_id,
         reference_note=payload.reference_note,
     )
@@ -159,6 +203,7 @@ def create_client_payment_order(
             "requirement_id": payment.requirement_id,
             "amount": payment.amount,
             "status": payment.payment_status,
+            "purpose": payment.purpose,
         },
     )
 
@@ -172,6 +217,7 @@ def create_client_payment_order(
             "currency": "INR",
             "razorpay_key_id": settings.razorpay_key_id,
             "status": payment.payment_status,
+            "purpose": payment.purpose,
         },
     )
 
@@ -209,6 +255,7 @@ def list_all_my_payments(
             "location": f"{req.city}, {req.state}" if req else None,
             "duration_days": req.duration_days if req else None,
             "amount": p.amount,
+            "purpose": p.purpose,
             "payment_model": p.payment_model,
             "payment_mode": p.payment_mode,
             "payment_status": p.payment_status,
@@ -240,6 +287,7 @@ def list_client_payments_for_requirement(
         {
             "id": item.id,
             "amount": item.amount,
+            "purpose": item.purpose,
             "payment_model": item.payment_model,
             "payment_mode": item.payment_mode,
             "payment_status": item.payment_status,
@@ -374,11 +422,35 @@ def submit_reference_payment(
     if not requirement or requirement.client_id != client_profile.id:
         raise HTTPException(status_code=404, detail="Requirement not found")
 
+    quote = get_quote_by_requirement_id(db, requirement.id)
+    payments = get_client_payments_by_requirement_id(db, requirement.id)
+    if any(
+        payment.reference_note == payload.reference_note
+        and payment.payment_mode == payload.payment_mode
+        for payment in payments
+    ):
+        raise HTTPException(status_code=409, detail="This payment reference was already submitted")
+    try:
+        intent = derive_client_payment_intent(requirement, quote, payments)
+    except PaymentLedgerError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if any(
+        payment.payment_status == ClientPaymentStatus.PENDING.value
+        and payment.amount == intent.amount
+        and payment.purpose == intent.purpose
+        for payment in payments
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="A matching payment is already pending verification",
+        )
+
     payment = build_reference_client_payment(
         client_id=client_profile.id,
         requirement_id=payload.requirement_id,
-        amount=payload.amount,
-        payment_model=payload.payment_model,
+        amount=intent.amount,
+        payment_model=intent.payment_model,
+        purpose=intent.purpose,
         payment_mode=payload.payment_mode,
         reference_note=payload.reference_note,
     )
@@ -416,6 +488,7 @@ def submit_reference_payment(
             "amount": payment.amount,
             "payment_mode": payment.payment_mode,
             "payment_status": payment.payment_status,
+            "purpose": payment.purpose,
             "reference_note": payment.reference_note,
         },
     )
@@ -461,29 +534,7 @@ def verify_razorpay_payment(
         gateway_signature=payload.razorpay_signature,
     )
 
-    # Auto-complete requirement for full (non-advance) gateway payments.
-    # Advance payments still need admin confirmation before deployment.
     requirement = get_requirement_by_id(db, payment.requirement_id)
-    is_advance = False
-    if requirement:
-        quote = get_quote_by_requirement_id(db, requirement.id)
-        if quote and quote.advance_amount:
-            # This payment is an advance only if no prior paid advance exists yet.
-            # If a paid payment already exists for this requirement, the current
-            # payment is the remaining balance — even if the amounts match.
-            prior_payments = get_client_payments_by_requirement_id(db, requirement.id)
-            already_has_paid_advance = any(
-                p.id != payment.id
-                and p.payment_status == ClientPaymentStatus.PAID.value
-                for p in prior_payments
-            )
-            if not already_has_paid_advance and payment.amount <= quote.advance_amount:
-                is_advance = True
-        if not is_advance and requirement.status not in (
-            RequirementStatus.COMPLETED.value,
-            RequirementStatus.CANCELLED.value,
-        ):
-            requirement.status = RequirementStatus.COMPLETED.value
 
     db.commit()
 
@@ -519,7 +570,7 @@ def verify_razorpay_payment(
             "payment_id": payment.id,
             "razorpay_payment_id": payload.razorpay_payment_id,
             "client_user_id": current_user.id,
-            "auto_completed": not is_advance,
+            "requirement_status_changed": False,
         },
     )
     queue_notification(

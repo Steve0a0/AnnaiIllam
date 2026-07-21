@@ -1,0 +1,22 @@
+# Secrets & local env — never copy into the image
+.env
+.env.*
+*.pem
+*.key
+
+# Python caches & virtualenvs
+__pycache__/
+*.pyc
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Local dev data & docs not needed at runtime
+uploads/
+tests/
+docs/
+*.md
+.git/
+.github/

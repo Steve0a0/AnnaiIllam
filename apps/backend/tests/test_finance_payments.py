@@ -109,22 +109,22 @@ def approved_requirement(db, client_profile, client_user, admin_user):
     db.add(req)
     db.commit()
     db.refresh(req)
+    db.add(
+        Quote(
+            requirement_id=req.id,
+            quoted_amount=30000,
+            advance_amount=5000,
+            payment_model=PaymentModel.CLIENT_PAYS_COMPANY.value,
+            status="approved",
+            created_by_user_id=admin_user.id,
+        )
+    )
+    db.commit()
     return req
 
 
 @pytest.fixture
 def approved_requirement_with_advance_quote(db, approved_requirement, admin_user):
-    quote = Quote(
-        requirement_id=approved_requirement.id,
-        quoted_amount=30000,
-        advance_amount=5000,
-        payment_model=PaymentModel.CLIENT_PAYS_COMPANY.value,
-        status="approved",
-        created_by_user_id=admin_user.id,
-    )
-    db.add(quote)
-    db.commit()
-    db.refresh(quote)
     return approved_requirement
 
 
@@ -261,6 +261,29 @@ class TestRazorpayOrderCreation:
         assert data["gateway_order_id"] == "order_FAKEID001"
         assert data["amount"] == 5000
         assert data["status"] == ClientPaymentStatus.PENDING.value
+
+    def test_client_amount_and_model_cannot_change_authoritative_charge(
+        self, client, client_headers, client_profile, approved_requirement
+    ):
+        fake_order = {"id": "order_SERVER_AUTH", "amount": 500000, "currency": "INR"}
+        with patch(
+            "app.api.client_payments.razorpay_service.create_order",
+            return_value=fake_order,
+        ) as create_order:
+            response = client.post(
+                f"{BASE}/client/payments/create-order",
+                json={
+                    "requirement_id": approved_requirement.id,
+                    "amount": 1,
+                    "payment_model": PaymentModel.MIXED.value,
+                },
+                headers=client_headers,
+            )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["amount"] == 5000
+        create_order.assert_called_once()
+        assert create_order.call_args.kwargs["amount_rupees"] == 5000
 
     def test_non_client_cannot_create_order(
         self, client, admin_headers, approved_requirement
@@ -719,11 +742,10 @@ class TestClientPaymentStatusUpdate:
         )
         assert response.status_code == 403
 
-    def test_paid_auto_transitions_approved_requirement_to_assigned(
+    def test_paid_does_not_transition_operational_requirement_state(
         self, client, db, admin_headers, approved_requirement_with_advance_quote, client_profile
     ):
-        """Marking a payment as PAID for an approved requirement with advance_amount
-        auto-transitions the requirement status to 'assigned'."""
+        """Finance confirms the payment; Operations still owns assignment."""
         req = approved_requirement_with_advance_quote
         payment = ClientPayment(
             client_id=client_profile.id,
@@ -744,11 +766,11 @@ class TestClientPaymentStatusUpdate:
         )
         assert response.status_code == 200
         data = response.json()["data"]
-        assert data["requirement_auto_transitioned"] is True
-        assert data["new_requirement_status"] == RequirementStatus.WORKERS_ASSIGNED.value
+        assert data["requirement_auto_transitioned"] is False
+        assert data["new_requirement_status"] is None
 
         db.refresh(req)
-        assert req.status == RequirementStatus.WORKERS_ASSIGNED.value
+        assert req.status == RequirementStatus.APPROVED.value
 
     def test_paid_no_auto_transition_when_no_advance_quote(
         self, client, db, admin_headers, approved_requirement, client_profile
@@ -980,7 +1002,7 @@ class TestFinanceListEndpoints:
             amount=payroll_item.net_amount,
             payout_mode="bank_transfer",
             payout_status=WorkerPayoutStatus.PENDING.value,
-            paid_by_user_id=1,
+            paid_by_user_id=None,  # pending payout has no payer yet
         )
         db.add(payout)
         db.commit()
@@ -1012,10 +1034,10 @@ class TestReferencePaymentSubmission:
         base.update(overrides)
         return base
 
-    def test_reference_payment_stores_provided_payment_model(
+    def test_reference_payment_uses_quote_payment_model(
         self, client, db, client_headers, client_profile, approved_requirement
     ):
-        """payment_model from the request must be stored verbatim — no hardcoding."""
+        """The approved quote, not the request, determines payment_model."""
         response = client.post(
             f"{BASE}/client/payments/submit-reference",
             json=self._payload(
@@ -1032,10 +1054,10 @@ class TestReferencePaymentSubmission:
         assert payment is not None
         assert payment.payment_model == PaymentModel.CLIENT_PAYS_COMPANY.value
 
-    def test_reference_payment_with_mixed_model_stores_mixed(
+    def test_reference_payment_ignores_tampered_valid_payment_model(
         self, client, db, client_headers, client_profile, approved_requirement
     ):
-        """Any valid PaymentModel value must be stored, not overwritten by a hardcoded default."""
+        """A valid-looking client override cannot change the quote's model."""
         response = client.post(
             f"{BASE}/client/payments/submit-reference",
             json=self._payload(
@@ -1049,7 +1071,8 @@ class TestReferencePaymentSubmission:
 
         from app.models.client_payment import ClientPayment as CP
         payment = db.get(CP, payment_id)
-        assert payment.payment_model == PaymentModel.MIXED.value
+        assert payment.payment_model == PaymentModel.CLIENT_PAYS_COMPANY.value
+        assert payment.amount == 5000
 
     def test_reference_payment_invalid_payment_model_returns_422(
         self, client, client_headers, client_profile, approved_requirement
@@ -1061,7 +1084,7 @@ class TestReferencePaymentSubmission:
         )
         assert response.status_code == 422
 
-    def test_reference_payment_missing_payment_model_returns_422(
+    def test_reference_payment_missing_payment_model_is_supported(
         self, client, client_headers, client_profile, approved_requirement
     ):
         payload = self._payload(approved_requirement.id)
@@ -1071,7 +1094,7 @@ class TestReferencePaymentSubmission:
             json=payload,
             headers=client_headers,
         )
-        assert response.status_code == 422
+        assert response.status_code == 200
 
     def test_reference_payment_appears_in_list_with_correct_model(
         self, client, client_headers, client_profile, approved_requirement

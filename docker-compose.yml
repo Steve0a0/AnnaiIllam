@@ -1,0 +1,119 @@
+# Full backend stack for local development.
+#
+#   docker compose up -d
+#
+# Brings up: postgres + redis + minio + backend API + a DEDICATED scheduler.
+# The admin (Next.js) and mobile (Expo) run natively — do NOT dockerize them
+# for dev (slow hot-reload on Windows; Expo is a native toolchain).
+#
+# Why a separate `scheduler` service: the API runs with RUN_SCHEDULER=false, so
+# no matter how many API workers start, exactly ONE process runs scheduled jobs
+# (no duplicate no-show rows, no double notifications).
+
+x-backend: &backend
+  build:
+    context: ./apps/backend
+  image: annai-illam-backend:local
+  environment: &backend-env
+    APP_ENV: local
+    DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/annai_illam
+    REDIS_URL: redis://redis:6379/0
+    JWT_SECRET_KEY: local-dev-jwt-secret-change-me-min-32-chars
+    # Generate a real one: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-}
+    SMS_PROVIDER: console
+    # --- MinIO / S3 (optional) -------------------------------------------
+    # Leave unset and the backend stores uploads on the local filesystem.
+    # To use MinIO instead, create a bucket in the console (http://localhost:9001)
+    # and uncomment these:
+    # S3_ENDPOINT_URL: http://minio:9000
+    # S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
+    # S3_BUCKET: annai-dev
+    # AWS_ACCESS_KEY_ID: minioadmin
+    # AWS_SECRET_ACCESS_KEY: minioadmin
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: annai_illam
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # console → http://localhost:9001
+    volumes:
+      - minio_data:/data
+
+  # One-shot: apply migrations, then exit. Backend + scheduler wait for it.
+  migrate:
+    <<: *backend
+    command: alembic upgrade head
+    restart: "no"
+
+  backend:
+    <<: *backend
+    command: sh -c "uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY:-2} --no-access-log"
+    environment:
+      <<: *backend-env
+      RUN_SCHEDULER: "false"   # API never runs the scheduler — the scheduler service does
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  scheduler:
+    <<: *backend
+    command: python -m app.scheduler_runner
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
+  minio_data:
