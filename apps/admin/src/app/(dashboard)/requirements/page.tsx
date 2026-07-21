@@ -44,7 +44,7 @@ const ACTIVE_STATUSES = new Set([
 ]);
 
 export default function RequirementsPage() {
-  const { data, isLoading, isError, error, refetch } = useRequirements();
+  const { data, dataUpdatedAt, isLoading, isError, error, refetch } = useRequirements();
   const [activeStatus, setActiveStatus] = useState("all");
   const [query, setQuery] = useState("");
 
@@ -193,7 +193,7 @@ export default function RequirementsPage() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {filteredRequirements.map((item) => (
-                    <RequirementRow key={item.id} item={item} />
+                    <RequirementRow key={item.id} item={item} now={dataUpdatedAt} />
                   ))}
                 </tbody>
               </table>
@@ -212,12 +212,18 @@ export default function RequirementsPage() {
   );
 }
 
-function RequirementRow({ item }: { item: AdminRequirementListItem }) {
+function RequirementRow({
+  item,
+  now,
+}: {
+  item: AdminRequirementListItem;
+  now: number;
+}) {
   const action = getRequirementAction(item.status);
   const isSlaBreach = item.sla_breach_notified_at !== null;
   const hoursWaiting =
     item.status === "submitted"
-      ? Math.floor((Date.now() - new Date(item.created_at).getTime()) / 3_600_000)
+      ? Math.floor((now - new Date(item.created_at).getTime()) / 3_600_000)
       : null;
 
   return (

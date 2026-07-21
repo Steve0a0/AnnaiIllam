@@ -91,6 +91,7 @@ export type CreateQuotePayload = {
   requirement_id: number;
   quoted_amount: number;
   rate_per_worker?: number | null;
+  worker_daily_rate?: number | null;
   total_worker_days?: number | null;
   advance_amount?: number | null;
   payment_model: string;

@@ -264,7 +264,7 @@ function BlacklistSection({ clientProfileId }: { clientProfileId: number }) {
           <div>
             <p className="text-sm font-semibold text-foreground">Blocked workers</p>
             <p className="text-xs text-muted-foreground">
-              Blacklisted workers are excluded from match results for this client's requirements.
+              Blacklisted workers are excluded from match results for this client&apos;s requirements.
             </p>
           </div>
         </div>

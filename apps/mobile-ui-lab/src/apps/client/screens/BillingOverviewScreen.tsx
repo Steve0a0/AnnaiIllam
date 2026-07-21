@@ -158,5 +158,5 @@ const STATUS_META: Record<PaymentStatus, { label: string; bg: string; color: str
   pending:              { label: 'Pending',             bg: C.infoBg,     color: C.infoText     },
   pending_verification: { label: 'Verifying',           bg: C.warningBg,  color: C.warningText  },
   failed:               { label: 'Failed',              bg: C.dangerBg,   color: C.dangerText   },
-  refunded:             { label: 'Refunded',            bg: C.neutralBg ?? '#F5F5F4', color: C.muted },
+  refunded:             { label: 'Refunded',            bg: C.neutralBg,   color: C.muted        },
 };

@@ -21,27 +21,30 @@ The production audit completed on 2026-07-20 supersedes older readiness claims w
 |---|---|
 | Current phase | `Production Hardening — Gate 0 complete` |
 | Current priority | Close audited P0 security, payment, scheduler, build, mobile-release, and compliance blockers |
-| Next work | Execute `PROD-003` public user-directory fix and `PROD-002` release gates |
+| Next work | Obtain Product/Finance sign-off for `PROD-004`, then execute `PROD-005` and `PROD-006` |
 | Release branch | `production-hardening` |
 | Feature freeze | Active; no unrelated product features on the release branch |
-| Last updated | 2026-07-20 |
+| Last updated | 2026-07-21 |
 
 ### Production Hardening Queue
 
 | Priority | Status | Task | App | Notes |
 |---|---|---|---|---|
 | P0 | DONE | PROD-001: Create production hardening release baseline | All/Docs | Branch, freeze, role owners, approval matrix, verified failing gates, audit corrections, and PROD-001–046 register documented |
-| P0 | TODO | PROD-003: Remove unauthenticated user-directory disclosure | Backend | First critical implementation ticket; protect or remove `GET /api/v1/users` and add authorization tests |
+| P0 | DONE | PROD-003: Remove unauthenticated user-directory disclosure | Backend | `GET /api/v1/users` is super-admin-only, paginated, excludes phone/email/name, and has router-wide authentication regression coverage; 29 targeted tests pass |
 | P0 | NEEDS_REVIEW | PROD-002: Establish mandatory release gates | All/CI | Workflows, scans, pinned runtimes, required-check list, and PR template are implemented; activate the documented GitHub ruleset after checks register |
-| P0 | TODO | PROD-004–006: Repair payment invariants and processing | Backend/Finance | Eliminate client-controlled authoritative amount and make verification/webhooks transactional |
+| P0 | NEEDS_REVIEW | PROD-004: Define authoritative payment ledger and invariants | Backend/Product/Finance | Central ledger service, integer-rupee contract, explicit purposes, server-derived client charges, refund/overpayment rules, and lifecycle decision implemented; Product/Finance sign-off pending |
+| P0 | TODO | PROD-005–006: Harden gateway calculation and transaction processing | Backend/Finance | Verify gateway boundaries, then make verification/webhooks transactional |
 | P0 | TODO | PROD-009–011: Repair scheduler, no-show timing, and timezones | Backend/DevOps | Separate singleton scheduler and use India business dates |
-| P0 | TODO | PROD-008/019/020: Restore release gates | Backend/Admin/Mobile | Fix Ruff, admin lint/build, and mobile TypeScript failures |
+| P0 | TODO | PROD-008: Restore backend lint gate | Backend | Fix remaining Ruff violations and runtime defects |
+| P0 | DONE | PROD-019: Restore admin production build | Admin | ESLint has 0 errors, tests pass 25/25, and the Next.js production build completes |
+| P0 | DONE | PROD-020: Restore mobile type safety | Mobile | TypeScript passes with 0 errors and mobile tests pass 11/11 |
 
 ### Audit Status Reclassification
 
 | Historical item | Current status | Reason | Replacement ticket |
 |---|---|---|---|
-| GitHub Actions release gates | NEEDS_REVIEW | Backend/admin/mobile/security workflows are registered; follow-up CI/dependency fixes need a GitHub rerun, and current Ruff/ESLint/admin build/mobile TypeScript debt remains | PROD-002, PROD-008, PROD-019, PROD-020 |
+| GitHub Actions release gates | NEEDS_REVIEW | Admin and mobile application gates pass locally; backend Ruff and the exact security scan findings still require remediation/verification, followed by a GitHub rerun | PROD-002, PROD-008 |
 | Feature 4: No-Show / Absent Worker Handling | NEEDS_REVIEW | Scheduler can run in every API worker and can evaluate before shift/grace time | PROD-009, PROD-010 |
 | HARD-1: Environment & Secrets Audit | NEEDS_REVIEW | Production secrets management and Docker build-context exclusion are missing | PROD-031, PROD-033 |
 | HARD-2: CORS & Security Headers | NEEDS_REVIEW | API headers exist; admin headers and browser session hardening remain open | PROD-016, PROD-017 |

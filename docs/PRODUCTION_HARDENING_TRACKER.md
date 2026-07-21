@@ -11,7 +11,7 @@ This is the execution board for taking Annai Illam from the audited state to a c
 | Release scope | Security, financial integrity, reliability, compliance, deployment, and verification only |
 | Baseline owner | Tech Lead |
 | Current gate | Gate 0 — baseline recorded |
-| Next critical work | `PROD-003` public user-directory disclosure, with `PROD-002` release gates in parallel |
+| Next critical work | Product/Finance sign-off for `PROD-004`, then `PROD-005` and `PROD-006` |
 
 ## Feature Freeze Rules
 
@@ -88,8 +88,8 @@ Names can replace these role owners when the delivery team is confirmed. Until t
 |---|---|---|---|---|
 | PROD-001 | P0 | DONE | Tech Lead | Create production hardening release baseline |
 | PROD-002 | P0 | NEEDS_REVIEW | Tech Lead / DevOps Engineer | Gates implemented in-repo; GitHub branch ruleset activation remains external |
-| PROD-003 | P0 Critical | TODO | Backend Engineer | Remove unauthenticated user-directory disclosure |
-| PROD-004 | P0 Critical | TODO | Backend Engineer / Product / Finance | Define authoritative payment ledger and invariants |
+| PROD-003 | P0 Critical | DONE | Backend Engineer | User directory is super-admin-only, paginated, minimal, and covered by route-authentication regression tests |
+| PROD-004 | P0 Critical | NEEDS_REVIEW | Backend Engineer / Product / Finance | Ledger implementation and tests complete; required Product/Finance sign-off remains pending |
 | PROD-005 | P0 Critical | TODO | Backend Engineer | Fix Razorpay order amount calculation |
 | PROD-006 | P0 Critical | TODO | Backend Engineer | Make payment verification and webhooks transactional |
 | PROD-007 | P0 | TODO | Backend / Admin / Mobile / Finance | Separate payment receipts from GST invoices |
@@ -104,8 +104,8 @@ Names can replace these role owners when the delivery team is confirmed. Until t
 | PROD-016 | P1 High | TODO | Backend / Admin | Harden admin session storage |
 | PROD-017 | P1 | TODO | Admin / DevOps | Add admin web security headers |
 | PROD-018 | P1 | TODO | Backend / Security | Redesign audit events |
-| PROD-019 | P0 | TODO | Admin Frontend Engineer | Restore admin production build |
-| PROD-020 | P0 | TODO | Mobile Engineer | Restore mobile type safety |
+| PROD-019 | P0 | DONE | Admin Frontend Engineer | ESLint, 25 unit tests, and Next.js production build pass |
+| PROD-020 | P0 | DONE | Mobile Engineer | TypeScript and 11 mobile unit tests pass |
 | PROD-021 | P1 | TODO | Mobile Engineer | Fix worker onboarding resume |
 | PROD-022 | P0 | TODO | Mobile / DevOps / Product | Create separate client and worker production apps |
 | PROD-023 | P1 | TODO | Mobile Engineer | Complete mobile permission configuration |
@@ -147,12 +147,11 @@ Names can replace these role owners when the delivery team is confirmed. Until t
 
 ## Next Execution Order
 
-1. `PROD-003` — close the public user-directory disclosure.
-2. Activate the `PROD-002` GitHub branch ruleset after the workflows run once.
-3. `PROD-004` through `PROD-006` — repair financial invariants.
-4. `PROD-009` through `PROD-011` — repair scheduler and time handling.
-5. `PROD-008`, `PROD-019`, and `PROD-020` — make all applications releasable.
-6. `PROD-031` and `PROD-022` — secure builds and split mobile releases.
+1. Activate the `PROD-002` GitHub branch ruleset with the registered checks.
+2. Obtain Product/Finance sign-off for `PROD-004`, then implement `PROD-005` and `PROD-006`.
+3. `PROD-009` through `PROD-011` — repair scheduler and time handling.
+4. `PROD-008` — restore the backend Ruff gate.
+5. `PROD-031` and `PROD-022` — secure builds and split mobile releases.
 
 ## PROD-002 Verification Evidence — 2026-07-20
 
@@ -175,8 +174,69 @@ Verification:
 - The first run exposed a Redis health-command quoting defect and high/critical npm advisories. The follow-up fixes the Redis option, updates the admin/mobile lockfiles, pins patched Next.js, and overrides the vulnerable transitive mobile `ws` release.
 - The exact admin and mobile production audit commands now exit successfully with no high or critical advisories. A GitHub rerun is required to verify the pushed result.
 - Docker 29.6.1 is available, but local image builds were not run because PROD-031 has not yet excluded local environment files from Docker build contexts.
-- Existing Ruff, admin lint/build, and mobile TypeScript failures are expected to keep the new gates red until PROD-008, PROD-019, and PROD-020 are resolved.
+- Admin lint/build and mobile TypeScript are now green locally. Backend Ruff remains assigned to PROD-008; security workflow findings still require the GitHub failing-step logs.
+
+## PROD-019 and PROD-020 Verification Evidence — 2026-07-21
+
+Implemented:
+
+- Admin render-time age calculation now uses React Query's stable update timestamp.
+- Admin JSX copy passes the unescaped-entity rule.
+- Worker review prefetching initializes its own React Query client.
+- The admin quote payload type now matches the backend `worker_daily_rate` field.
+- Mobile client colors include the typed `neutralBg` semantic token used by refunded-payment badges.
+
+Verification:
+
+- Admin `npm run lint`: passed with 0 errors and 8 non-blocking warnings.
+- Admin `npm test`: 25/25 passed.
+- Admin `npm run build`: passed, including TypeScript and 24 generated pages.
+- Mobile `npx tsc --noEmit`: passed.
+- Mobile `npm test -- --runInBand`: 11/11 passed.
 
 Remaining acceptance step:
 
 - Push the follow-up fixes, rerun the workflows, and activate the `main`/`develop` GitHub ruleset with the registered check names. No GitHub CLI or authenticated token is available in this workspace, so this server-side setting cannot be applied locally. Keep PROD-002 at `NEEDS_REVIEW` until the ruleset and a blocked-merge test pull request are evidenced.
+
+## PROD-003 Verification Evidence — 2026-07-20
+
+Implemented:
+
+- `GET /api/v1/users` now requires the `super_admin` permission group.
+- Client, worker, non-super-admin, missing, and invalid credentials cannot access the directory.
+- The response is paginated and constrained by an explicit schema to `id`, `role`, `is_active`, and `created_at`; phone, email, and name are never returned.
+- A regression test scans every registered API route and fails if a route becomes unauthenticated without being added to the explicit public-route allowlist.
+
+Verification:
+
+- `python -m pytest tests/test_users.py tests/test_permission_groups.py -v`: 29 passed.
+- `python -m ruff check app/api/users.py app/schemas/user.py tests/test_users.py`: passed.
+- `git diff --check`: passed.
+
+## PROD-004 Verification Evidence — 2026-07-20
+
+Implemented:
+
+- `payment_ledger_service.py` is the single owner of quote totals, advance due,
+  net paid, refunded, outstanding, and overpaid calculations.
+- Client charge amount and model are derived from the approved quote and ledger;
+  deprecated client hints cannot change the charge.
+- Client receivables use documented integer whole INR rupees. Razorpay alone
+  converts to integer paise at its adapter boundary.
+- Payments have explicit advance, balance, adjustment, and refund purposes.
+- New overpayments and excess refunds are rejected; duplicate gateway intents
+  are reused and duplicate pending references are rejected.
+- Payment success/admin verification changes only the ledger. Assignment and
+  completion remain operational actions.
+- The state diagram and approval record are in `docs/PAYMENT_LEDGER.md`.
+
+Verification:
+
+- `python -m pytest tests/test_payment_ledger.py tests/test_quote_amount_verification.py tests/test_payment_transitions.py -q`: 16 passed.
+- `python -m pytest tests/test_finance_payments.py -q`: 49 passed.
+- Combined payment and assignment-gate regression run: 67 passed.
+- Full `tests/test_assignments.py`: 46 passed, 5 failed in pre-existing
+  worker availability/capacity/replacement paths; the known undefined
+  `old_worker_profile` runtime failure remains assigned to PROD-008.
+- Product owner sign-off: PENDING.
+- Finance owner sign-off: PENDING.
