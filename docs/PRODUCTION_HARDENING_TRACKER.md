@@ -11,7 +11,7 @@ This is the execution board for taking Annai Illam from the audited state to a c
 | Release scope | Security, financial integrity, reliability, compliance, deployment, and verification only |
 | Baseline owner | Tech Lead |
 | Current gate | Gate 0 — baseline recorded |
-| Next critical work | Product/Finance sign-off for `PROD-004`, then `PROD-005` and `PROD-006` |
+| Next critical work | Product Owner must engage Indian labour counsel for `PROD-025`; payment sign-offs continue in parallel |
 
 ## Feature Freeze Rules
 
@@ -101,7 +101,7 @@ Names can replace these role owners when the delivery team is confirmed. Until t
 | PROD-013 | P1 High | DONE | Backend / Mobile | Google and Apple are explicitly opt-in, enabled providers require startup audiences, and cross-app tokens are rejected. |
 | PROD-014 | P1 High | TODO | Backend / DevOps | Make critical rate limits fail safely |
 | PROD-015 | P1 High | TODO | Backend / Mobile / DevOps | Secure document and selfie uploads |
-| PROD-016 | P1 High | TODO | Backend / Admin | Harden admin session storage |
+| PROD-016 | P1 High | DONE | Backend / Admin | HttpOnly rotating refresh cookie, in-memory five-minute access token, family-bound CSRF/origin checks, reuse detection, and XSS source audit are implemented and verified. |
 | PROD-017 | P1 | TODO | Admin / DevOps | Add admin web security headers |
 | PROD-018 | P1 | TODO | Backend / Security | Redesign audit events |
 | PROD-019 | P0 | DONE | Admin Frontend Engineer | ESLint, 25 unit tests, and Next.js production build pass |
@@ -110,11 +110,11 @@ Names can replace these role owners when the delivery team is confirmed. Until t
 | PROD-022 | P0 | TODO | Mobile / DevOps / Product | Create separate client and worker production apps |
 | PROD-023 | P1 | TODO | Mobile Engineer | Complete mobile permission configuration |
 | PROD-024 | P1 | TODO | Admin / Mobile / QA | Remediate accessibility defects |
-| PROD-025 | P0 | TODO | Product / Indian Legal Counsel | Decide business and worker legal classification |
+| PROD-025 | P0 External | BLOCKED | Product / Indian Legal Counsel | Counsel pack, decision record, and conditional implementation tickets are prepared. Product must retain counsel; signed classification memo and agreement updates block pilot launch. |
 | PROD-026 | P0 | NEEDS_REVIEW | Backend / Admin / Finance / CA | GST invoice snapshot, FY sequence, tax split, immutability, and shared document implemented. CA samples, e-invoice decision, and credit-note scope remain. |
-| PROD-027 | P0 | TODO | Product / Backend / Admin / Mobile / Legal | Implement cancellation, refund, and dispute policy |
-| PROD-028 | P0 | TODO | Legal / Product / Admin / Mobile | Publish privacy, terms, and grievance surfaces |
-| PROD-029 | P0 | TODO | Backend / Admin / Mobile / Privacy Counsel | Implement DPDP consent and data-rights workflow |
+| PROD-027 | P0 | NEEDS_REVIEW | Product / Backend / Admin / Mobile / Legal | Refund execution and ledger controls exist; dated cancellation/refund policy is published in code. Commercial windows, turnaround, tax treatment, and legal approval remain. |
+| PROD-028 | P0 | NEEDS_REVIEW | Legal / Product / Admin / Mobile | Five dated public pages, legacy redirects, both-app settings links, and admin footer are implemented. Registered entity configuration, deployment URL checks, and counsel approval remain. |
+| PROD-029 | P0 | NEEDS_REVIEW | Backend / Admin / Mobile / Privacy Counsel | Server-owned version/role/time acceptance, consent gate, export/deletion requests, and app-store deletion page are implemented. Privacy/retention approval remains. |
 | PROD-030 | P1 | TODO | Backend / Legal / DevOps | Implement retention and deletion controls |
 | PROD-031 | P0 | TODO | Backend / Admin / DevOps | Add secure Docker build contexts |
 | PROD-032 | P0 | TODO | DevOps Engineer | Provision staging infrastructure |
@@ -172,6 +172,7 @@ Verification:
 - The first `production-hardening` GitHub Actions run registered all required check names. Both CodeQL jobs passed; dependency review correctly skipped because the event was a branch push rather than a pull request.
 - The first run exposed a Redis health-command quoting defect and high/critical npm advisories. The follow-up fixes the Redis option, updates the admin/mobile lockfiles, pins patched Next.js, and overrides the vulnerable transitive mobile `ws` release.
 - The exact admin and mobile production audit commands now exit successfully with no high or critical advisories.
+- On 2026-07-21, newly published `fast-uri` and Sharp/libvips advisories made the admin gate red again. Admin now overrides `fast-uri` 3.1.4, PostCSS 8.5.14, and Sharp 0.35.3; `npm audit --omit=dev --audit-level=high`, tests, lint, and the Next.js production build pass locally.
 - Backend vulnerable pins were upgraded as a compatible FastAPI/Starlette and pytest/pytest-asyncio set. `python -m pip_audit -r requirements.txt` reports no known vulnerabilities.
 - Docker 29.6.1 is available, but local image builds were not run because PROD-031 has not yet excluded local environment files from Docker build contexts.
 - Admin lint/build, mobile TypeScript, backend Ruff, and the full backend suite are green locally. The backend suite passes 796/796 tests against PostgreSQL and Redis after the dependency, scheduler, no-show, and timezone upgrades.
@@ -343,3 +344,30 @@ Verification:
   `old_worker_profile` runtime failure remains assigned to PROD-008.
 - Product owner sign-off: PENDING.
 - Finance owner sign-off: PENDING.
+
+## PROD-016 / ANNAI-14 Verification Evidence — 2026-07-21
+
+Implemented:
+
+- Admin login returns only a five-minute access token, a family-bound CSRF token,
+  and the admin profile; the refresh credential is never returned to JavaScript.
+- The rotating refresh token is stored in an HttpOnly, `SameSite=Lax` cookie and
+  marked `Secure` outside local development.
+- Admin refresh and logout require an exact allowed origin plus the signed CSRF
+  cookie/header pair. Refresh-token replay revokes every live token in its family.
+- Admin access and CSRF state is memory-only. Reload bootstrap and concurrent 401
+  recovery share one cookie-based refresh operation.
+- Client and worker body-token login/refresh contracts remain unchanged.
+- The source-level XSS audit is recorded in `docs/ADMIN_XSS_AUDIT.md`; no executable
+  HTML/JavaScript sink was found. Production CSP remains `PROD-017`.
+
+Verification:
+
+- Backend Ruff across `app`, `tests`, and `scripts`: passed.
+- Auth and route-guard regression suite: 52 passed.
+- Clean PostgreSQL migration chain: passed through `b14d9e2c6f80`.
+- Admin unit/security tests: 21 passed; ESLint: 0 errors and 8 existing warnings.
+- Next.js production build: passed, including TypeScript and 34 routes.
+- Full backend attempt: 781 passed; five unrelated date/business-flow assertions
+  remain failing, and 64 upload/e2e setups hit the known Windows pytest temp ACL
+  restriction. No remaining failure is in the admin session/auth route scope.

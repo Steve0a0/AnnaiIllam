@@ -5,7 +5,7 @@ import type { AuthUser } from "@/types/auth";
 
 type AuthState = {
   accessToken: string | null;
-  refreshToken: string | null;
+  csrfToken: string | null;
   user: AuthUser | null;
   /** true once AuthHydrator has run and restored (or confirmed absent) tokens */
   isHydrated: boolean;
@@ -13,13 +13,13 @@ type AuthState = {
   hasHydrated: boolean;
   setAuth: (payload: {
     accessToken: string;
-    refreshToken: string;
+    csrfToken: string;
     user: AuthUser;
   }) => void;
   setUser: (user: AuthUser | null) => void;
   hydrateAuth: (data: {
     accessToken: string | null;
-    refreshToken: string | null;
+    csrfToken: string | null;
     user: AuthUser | null;
   }) => void;
   clearAuth: () => void;
@@ -29,23 +29,23 @@ type AuthState = {
 
 export const useAuthStore = create<AuthState>((set) => ({
   accessToken: null,
-  refreshToken: null,
+  csrfToken: null,
   user: null,
   isHydrated: false,
   hasHydrated: false,
 
-  setAuth: ({ accessToken, refreshToken, user }) =>
-    set({ accessToken, refreshToken, user, isHydrated: true, hasHydrated: true }),
+  setAuth: ({ accessToken, csrfToken, user }) =>
+    set({ accessToken, csrfToken, user, isHydrated: true, hasHydrated: true }),
 
   setUser: (user) => set({ user }),
 
-  hydrateAuth: ({ accessToken, refreshToken, user }) =>
-    set({ accessToken, refreshToken, user, isHydrated: true, hasHydrated: true }),
+  hydrateAuth: ({ accessToken, csrfToken, user }) =>
+    set({ accessToken, csrfToken, user, isHydrated: true, hasHydrated: true }),
 
   clearAuth: () =>
     set({
       accessToken: null,
-      refreshToken: null,
+      csrfToken: null,
       user: null,
       isHydrated: true,
       hasHydrated: true,

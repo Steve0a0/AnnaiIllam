@@ -2,7 +2,6 @@
 
 import { useEffect } from "react";
 import { authService } from "@/services/auth.service";
-import { authStorage } from "@/lib/auth-storage";
 import { useAuthStore } from "@/store/auth-store";
 
 export function useBootstrapUser() {
@@ -18,9 +17,7 @@ export function useBootstrapUser() {
       try {
         const response = await authService.getMe();
         setUser(response.data);
-        authStorage.setUser(response.data);
       } catch {
-        authStorage.clear();
         clearAuth();
       }
     };

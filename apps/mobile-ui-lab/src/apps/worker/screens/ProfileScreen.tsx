@@ -480,6 +480,10 @@ export default function ProfileScreen() {
                 label="Manage Availability"
                 onPress={() => navigation.navigate('Availability')}
               />
+              <QuickLink
+                label="Privacy and data"
+                onPress={() => navigation.navigate('PrivacySettings')}
+              />
             </YStack>
 
           </YStack>

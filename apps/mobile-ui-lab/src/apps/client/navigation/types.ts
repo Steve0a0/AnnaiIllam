@@ -46,6 +46,7 @@ export type ProfileStackParamList = {
   ClientProfile: undefined;
   BillingOverview: undefined;
   InvoiceViewer: { invoiceId: number; invoiceNumber: string };
+  PrivacySettings: undefined;
 };
 
 // Backward-compat alias

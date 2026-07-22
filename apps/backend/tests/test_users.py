@@ -122,6 +122,8 @@ def _has_authentication_guard(dependant) -> bool:
             continue
         if getattr(call, "__name__", None) == "get_current_user":
             return True
+        if getattr(call, "__name__", None) == "get_admin_session_refresh_token":
+            return True
         if isinstance(call, OAuth2PasswordBearer):
             return True
     return False

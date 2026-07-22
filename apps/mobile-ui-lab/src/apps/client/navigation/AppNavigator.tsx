@@ -19,6 +19,7 @@ import InvoiceDetailScreen from '../screens/InvoiceDetailScreen';
 import PaymentConfirmScreen from '../screens/PaymentConfirmScreen';
 import RateRequirementScreen from '../screens/RateRequirementScreen';
 import DisputeScreen from '../screens/DisputeScreen';
+import PrivacySettingsScreen from '../../../shared/screens/PrivacySettingsScreen';
 import { clientProfileService } from '../../../shared/services/client-profile.service';
 import { useAuthStore } from '../../../shared/store/auth.store';
 
@@ -74,6 +75,7 @@ function ProfileStackNavigator() {
       <ProfileStack.Screen name="ClientProfile" component={ClientProfileScreen} />
       <ProfileStack.Screen name="BillingOverview" component={BillingOverviewScreen} />
       <ProfileStack.Screen name="InvoiceViewer" component={InvoiceViewerScreen} />
+      <ProfileStack.Screen name="PrivacySettings" component={PrivacySettingsScreen} />
     </ProfileStack.Navigator>
   );
 }

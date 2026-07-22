@@ -20,8 +20,8 @@ const MOCK_AUTH_RESPONSE = {
     message: "Login successful",
     data: {
       access_token: "access.token",
-      refresh_token: "refresh.token",
       token_type: "bearer",
+      csrf_token: "csrf.token",
       user: { id: 1, email: "admin@example.com", name: "Test Admin", role: "admin" },
     },
   },
@@ -92,24 +92,33 @@ describe("authService", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // refreshToken
+  // browser session bootstrap and rotation
   // ---------------------------------------------------------------------------
 
-  it("refreshToken posts refresh_token and returns new tokens", async () => {
+  it("getCsrfToken reads the server-issued CSRF token", async () => {
+    const response = { data: { success: true, data: { csrf_token: "csrf.token" } } };
+    mockGet.mockResolvedValueOnce(response);
+    const result = await authService.getCsrfToken();
+    expect(mockGet).toHaveBeenCalledWith("/auth/admin/csrf");
+    expect(result).toEqual(response.data);
+  });
+
+  it("refreshSession uses the HttpOnly cookie and CSRF header", async () => {
     const mockRefreshResponse = {
       data: {
         success: true,
         data: {
           access_token: "new.access",
-          refresh_token: "new.refresh",
           token_type: "bearer",
+          csrf_token: "new.csrf",
+          user: { id: 1, email: "admin@example.com", name: "Test Admin", role: "admin" },
         },
       },
     };
     mockPost.mockResolvedValueOnce(mockRefreshResponse);
-    const result = await authService.refreshToken("old.refresh.token");
-    expect(mockPost).toHaveBeenCalledWith("/auth/refresh", {
-      refresh_token: "old.refresh.token",
+    const result = await authService.refreshSession("csrf.token");
+    expect(mockPost).toHaveBeenCalledWith("/auth/admin/refresh", undefined, {
+      headers: { "X-CSRF-Token": "csrf.token" },
     });
     expect(result).toEqual(mockRefreshResponse.data);
   });
@@ -118,18 +127,18 @@ describe("authService", () => {
   // logout
   // ---------------------------------------------------------------------------
 
-  it("logout posts refresh_token to /auth/logout", async () => {
+  it("logout uses the cookie session and CSRF header", async () => {
     mockPost.mockResolvedValueOnce({ data: { success: true } });
-    await authService.logout("refresh.token");
-    expect(mockPost).toHaveBeenCalledWith("/auth/logout", {
-      refresh_token: "refresh.token",
+    await authService.logout("csrf.token");
+    expect(mockPost).toHaveBeenCalledWith("/auth/admin/logout", undefined, {
+      headers: { "X-CSRF-Token": "csrf.token" },
     });
   });
 
   it("logout returns response data", async () => {
     const mockResponse = { data: { success: true, message: "Logged out successfully" } };
     mockPost.mockResolvedValueOnce(mockResponse);
-    const result = await authService.logout("refresh.token");
+    const result = await authService.logout("csrf.token");
     expect(result).toEqual(mockResponse.data);
   });
 });

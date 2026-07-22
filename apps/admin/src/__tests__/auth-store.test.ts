@@ -1,16 +1,16 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useAuthStore } from "@/store/auth-store";
 
-const MOCK_USER = { id: 1, phone: "9876543210", role: "admin" };
+const MOCK_USER = { id: 1, email: "admin@example.com", name: "Admin", role: "admin" };
 const MOCK_TOKENS = {
   accessToken: "access.token.here",
-  refreshToken: "refresh.token.here",
+  csrfToken: "csrf.token.here",
 };
 
 function resetStore() {
   useAuthStore.setState({
     accessToken: null,
-    refreshToken: null,
+    csrfToken: null,
     user: null,
     isHydrated: false,
     hasHydrated: false,
@@ -27,7 +27,7 @@ describe("useAuthStore", () => {
   it("starts with null tokens and user", () => {
     const state = useAuthStore.getState();
     expect(state.accessToken).toBeNull();
-    expect(state.refreshToken).toBeNull();
+    expect(state.csrfToken).toBeNull();
     expect(state.user).toBeNull();
     expect(state.isHydrated).toBe(false);
     expect(state.hasHydrated).toBe(false);
@@ -40,12 +40,12 @@ describe("useAuthStore", () => {
   it("setAuth stores tokens and user and marks hydrated", () => {
     useAuthStore.getState().setAuth({
       accessToken: MOCK_TOKENS.accessToken,
-      refreshToken: MOCK_TOKENS.refreshToken,
+      csrfToken: MOCK_TOKENS.csrfToken,
       user: MOCK_USER,
     });
     const state = useAuthStore.getState();
     expect(state.accessToken).toBe(MOCK_TOKENS.accessToken);
-    expect(state.refreshToken).toBe(MOCK_TOKENS.refreshToken);
+    expect(state.csrfToken).toBe(MOCK_TOKENS.csrfToken);
     expect(state.user).toEqual(MOCK_USER);
     expect(state.isHydrated).toBe(true);
     expect(state.hasHydrated).toBe(true);
@@ -58,13 +58,13 @@ describe("useAuthStore", () => {
   it("clearAuth removes tokens and user", () => {
     useAuthStore.getState().setAuth({
       accessToken: MOCK_TOKENS.accessToken,
-      refreshToken: MOCK_TOKENS.refreshToken,
+      csrfToken: MOCK_TOKENS.csrfToken,
       user: MOCK_USER,
     });
     useAuthStore.getState().clearAuth();
     const state = useAuthStore.getState();
     expect(state.accessToken).toBeNull();
-    expect(state.refreshToken).toBeNull();
+    expect(state.csrfToken).toBeNull();
     expect(state.user).toBeNull();
     expect(state.isHydrated).toBe(true);
     expect(state.hasHydrated).toBe(true);
@@ -77,10 +77,10 @@ describe("useAuthStore", () => {
   it("setUser updates user without touching tokens", () => {
     useAuthStore.getState().setAuth({
       accessToken: MOCK_TOKENS.accessToken,
-      refreshToken: MOCK_TOKENS.refreshToken,
+      csrfToken: MOCK_TOKENS.csrfToken,
       user: MOCK_USER,
     });
-    const updatedUser = { ...MOCK_USER, phone: "9999999999" };
+    const updatedUser = { ...MOCK_USER, name: "Updated Admin" };
     useAuthStore.getState().setUser(updatedUser);
     const state = useAuthStore.getState();
     expect(state.user).toEqual(updatedUser);
@@ -90,7 +90,7 @@ describe("useAuthStore", () => {
   it("setUser can set user to null", () => {
     useAuthStore.getState().setAuth({
       accessToken: MOCK_TOKENS.accessToken,
-      refreshToken: MOCK_TOKENS.refreshToken,
+      csrfToken: MOCK_TOKENS.csrfToken,
       user: MOCK_USER,
     });
     useAuthStore.getState().setUser(null);
@@ -101,10 +101,10 @@ describe("useAuthStore", () => {
   // hydrateAuth
   // ---------------------------------------------------------------------------
 
-  it("hydrateAuth with tokens sets authenticated state", () => {
+  it("hydrateAuth with in-memory session data sets authenticated state", () => {
     useAuthStore.getState().hydrateAuth({
       accessToken: MOCK_TOKENS.accessToken,
-      refreshToken: MOCK_TOKENS.refreshToken,
+      csrfToken: MOCK_TOKENS.csrfToken,
       user: MOCK_USER,
     });
     const state = useAuthStore.getState();
@@ -116,7 +116,7 @@ describe("useAuthStore", () => {
   it("hydrateAuth with nulls marks hydrated but unauthenticated", () => {
     useAuthStore.getState().hydrateAuth({
       accessToken: null,
-      refreshToken: null,
+      csrfToken: null,
       user: null,
     });
     const state = useAuthStore.getState();

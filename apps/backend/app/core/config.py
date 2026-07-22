@@ -26,6 +26,9 @@ class Settings(BaseSettings):
 
     jwt_secret_key: str
     access_token_expire_minutes: int = 30
+    # Browser admin sessions keep access tokens only in memory, so keep their
+    # exposure window short. Mobile access-token TTL remains configured above.
+    admin_access_token_expire_minutes: int = Field(default=5, ge=1, le=15)
     refresh_token_expire_days: int = 30
 
     otp_expire_minutes: int = 5
@@ -119,6 +122,10 @@ class Settings(BaseSettings):
     invoice_default_sac_code: str = ""
     invoice_default_gst_rate: float = Field(default=18.0, ge=0, le=100)
     invoice_authorised_signatory: str = ""
+
+    # Versioned public legal pages shared by the client and worker apps.
+    legal_public_base_url: str = "https://annaiillam.in/legal"
+    grievance_email: str = "privacy@annaiillam.in"
 
     # Sentry error monitoring. Leave SENTRY_DSN empty to disable.
     sentry_dsn: str = ""
@@ -259,6 +266,11 @@ class Settings(BaseSettings):
                 "S3_BUCKET must be set in staging/production. "
                 "Worker ID documents and selfies are stored in S3."
             )
+
+        if is_prod_like and not self.legal_public_base_url.startswith("https://"):
+            errors.append("LEGAL_PUBLIC_BASE_URL must use HTTPS in staging/production.")
+        if is_prod_like and "@" not in self.grievance_email:
+            errors.append("GRIEVANCE_EMAIL must be a valid monitored mailbox.")
         if is_prod_like and not self.selfie_bucket_domain:
             errors.append(
                 "SELFIE_BUCKET_DOMAIN must be set in staging/production so selfie references are restricted to owned storage."

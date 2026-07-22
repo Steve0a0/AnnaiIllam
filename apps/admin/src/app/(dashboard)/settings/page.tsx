@@ -11,7 +11,6 @@ import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { apiClient } from "@/services/api-client";
 import { authService } from "@/services/auth.service";
-import { authStorage } from "@/lib/auth-storage";
 import { useAuthStore } from "@/store/auth-store";
 import { getErrorMessage } from "@/lib/get-error-message";
 
@@ -35,7 +34,7 @@ export default function SettingsPage() {
   const router = useRouter();
   const user = useAuthStore((state) => state.user);
   const clearAuth = useAuthStore((state) => state.clearAuth);
-  const refreshToken = useAuthStore((state) => state.refreshToken);
+  const csrfToken = useAuthStore((state) => state.csrfToken);
 
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,11 +68,10 @@ export default function SettingsPage() {
   async function handleSignOut() {
     setIsSigningOut(true);
     try {
-      if (refreshToken) await authService.logout(refreshToken);
+      if (csrfToken) await authService.logout(csrfToken);
     } catch {
       // ignore — clear locally regardless
     } finally {
-      authStorage.clear();
       clearAuth();
       router.replace("/login");
     }

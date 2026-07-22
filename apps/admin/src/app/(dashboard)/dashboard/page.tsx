@@ -27,7 +27,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import PageHeader from "@/components/shared/page-header";
 import StatusBadge from "@/components/shared/status-badge";
-import { authStorage } from "@/lib/auth-storage";
 import { useAuthStore } from "@/store/auth-store";
 
 type PriorityAction = {
@@ -57,7 +56,6 @@ export default function DashboardPage() {
     if (axios.isAxiosError(error)) {
       const status = error.response?.status;
       if (status === 401 || status === 403) {
-        authStorage.clear();
         clearAuth();
         router.replace("/login");
       }

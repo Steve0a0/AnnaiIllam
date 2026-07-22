@@ -21,7 +21,7 @@ The production audit completed on 2026-07-20 supersedes older readiness claims w
 |---|---|
 | Current phase | `Production Hardening — Gate 0 complete` |
 | Current priority | Close audited P0 security, payment, scheduler, build, mobile-release, and compliance blockers |
-| Next work | Complete the interactive Razorpay sandbox capture/webhook proof, then obtain Product/Finance sign-off for `PROD-004` |
+| Next work | Product Owner sends the ANNAI-13 counsel pack immediately; payment sandbox/sign-off work continues in parallel |
 | Release branch | `production-hardening` |
 | Feature freeze | Active; no unrelated product features on the release branch |
 | Last updated | 2026-07-21 |
@@ -43,6 +43,10 @@ The production audit completed on 2026-07-20 supersedes older readiness claims w
 | P0 | TODO | PROD-008: Restore backend lint gate | Backend | Fix remaining Ruff violations and runtime defects |
 | P0 | DONE | PROD-019: Restore admin production build | Admin | ESLint has 0 errors, tests pass 25/25, and the Next.js production build completes |
 | P0 | DONE | PROD-020: Restore mobile type safety | Mobile | TypeScript passes with 0 errors and mobile tests pass 11/11 |
+| P1 | NEEDS_REVIEW | ANNAI-11: Account deletion and data export | Backend/Admin/Mobile | Request API, super-admin queue, on-demand export, audited anonymization, session/document cleanup, retained invoice/payroll links, focused tests, and public deletion page complete; legal retention approval remains |
+| P1 | NEEDS_REVIEW | ANNAI-12: Versioned policies and consent | Backend/Admin/Mobile/Legal | Dated public policies, role-aware fail-closed consent, immutable acceptance evidence, both-app settings links, dashboard footer, and focused tests complete; entity configuration, deployment proof, and counsel approval remain |
+| P2 | DONE | ANNAI-14 / PROD-016: Admin session hardening | Backend/Admin | HttpOnly rotating refresh cookie, memory-only five-minute access token, CSRF/origin protection, refresh-reuse family revocation, and admin XSS source audit verified |
+| P0 External | BLOCKED | ANNAI-13 / PROD-025: Worker-classification legal memo | Product/Indian labour counsel | Counsel pack, signed-memo acceptance criteria, decision record, and conditional payroll/agreement tickets prepared; counsel has not yet been retained and no classification is assumed |
 
 ### Audit Status Reclassification
 
@@ -51,7 +55,7 @@ The production audit completed on 2026-07-20 supersedes older readiness claims w
 | GitHub Actions release gates | NEEDS_REVIEW | Admin, mobile, backend Ruff/tests, and Python dependency audit pass locally; a GitHub rerun must confirm repository/container scans before ruleset enforcement | PROD-002, PROD-008 |
 | Feature 4: No-Show / Absent Worker Handling | DONE | One standalone scheduler owns the job; shift/grace timing and database idempotency are covered by regression tests | PROD-009, PROD-010 |
 | HARD-1: Environment & Secrets Audit | NEEDS_REVIEW | Production secrets management and Docker build-context exclusion are missing | PROD-031, PROD-033 |
-| HARD-2: CORS & Security Headers | NEEDS_REVIEW | API headers exist; admin headers and browser session hardening remain open | PROD-016, PROD-017 |
+| HARD-2: CORS & Security Headers | NEEDS_REVIEW | Browser session hardening is complete; deploy-time admin CSP/security headers remain open | PROD-017 |
 | HARD-3: Database Security & Indexes | NEEDS_REVIEW | Historical 763/763 is not a current release result; constraints and retention remain open | PROD-012, PROD-039 |
 | HARD-4: Error Handling & Logging | NEEDS_REVIEW | Backend lint exposes a runtime defect; audit/PII integrity remains open | PROD-008, PROD-018 |
 | PERF-2 load test | NEEDS_REVIEW | Historical local evidence is not production capacity proof | PROD-042 |
@@ -212,7 +216,7 @@ All data endpoints confirmed within target via FastAPI middleware `duration_ms` 
 
 - **Next.js 16 App Router** with parallel route groups: `(auth)` and `(dashboard)`.
 - **Pages**: dashboard, requirements (list + detail), assignments (list + detail), attendance, complaints (list + detail), payroll (list + detail), finance, workers, clients, settings, audit, SLA, reports (+ 3 sub-reports).
-- **Auth**: Phone + password login → JWT stored in localStorage. Axios interceptor handles 401 + auto-refresh. Role guard redirects non-admin to `/login`.
+- **Auth**: Email + password login creates an HttpOnly rotating refresh-cookie session. The five-minute access token and CSRF token stay in memory; Axios performs single-flight cookie refresh. Role guards redirect non-admin users to `/login`.
 - **OTP login is intentionally disabled** for admin — throws error if attempted.
 - **State**: Zustand for auth + React Query for all server state (30s staleTime, 1 retry).
 - **Error monitoring**: `@sentry/nextjs` is wired through App Router instrumentation (`src/instrumentation.ts`, `src/instrumentation-client.ts`) plus `global-error.tsx`; DSNs and sampling are env-driven.
@@ -226,7 +230,7 @@ All data endpoints confirmed within target via FastAPI middleware `duration_ms` 
 - **Expo SDK 54**, React Native 0.81.5, React 19 with New Architecture enabled.
 - **Two app variants** selected via `EXPO_PUBLIC_APP_VARIANT` env var: `client` or `worker`.
 - **Client screens**: WelcomeScreen, LoginScreen, VerifyOtpScreen, ProfileSetupScreen (auth); HomeScreen (stats + recent requests), RequestsScreen, RequestDetailScreen (timeline + quote approve/reject), CreateRequestScreen (4-step form).
-- **Worker screens**: WelcomeScreen, LoginScreen, VerifyOtpScreen, ConsentScreen, VerifyIdentityScreen (ID + selfie S3 upload), BuildProfileScreen (skills/shifts/payment), ProfileSubmittedScreen, UnderReviewScreen, BiometricSetupScreen, BiometricCheckScreen (auth); HomeScreen (hero job card + week strip + availability toggle + browse jobs), JobsBoardScreen (best match / nearby / other + interest toggle), AvailabilityScreen (weekly calendar per-day status).
+- **Worker screens**: WelcomeScreen, LoginScreen, VerifyOtpScreen, shared versioned legal consent gate, VerifyIdentityScreen (ID + selfie S3 upload), BuildProfileScreen (skills/shifts/payment), ProfileSubmittedScreen, UnderReviewScreen, BiometricSetupScreen, BiometricCheckScreen (auth); HomeScreen (hero job card + week strip + availability toggle + browse jobs), JobsBoardScreen (best match / nearby / other + interest toggle), AvailabilityScreen (weekly calendar per-day status).
 - **Worker HomeScreen** has: accept/decline assigned job, check-in/check-out with GPS, week strip calendar, availability toggle.
 - **Auth**: OTP for both roles. Tokens in `expo-secure-store`. Axios interceptor handles 401 + refresh. Workers also have biometric (Face ID/Touch ID) per-session auth.
 - **Gap: No complaints screens for client or worker in mobile.** No complaint raise, no complaint status tracking on mobile.
@@ -245,6 +249,22 @@ All data endpoints confirmed within target via FastAPI middleware `duration_ms` 
 - Google and Apple authentication are disabled by default through explicit provider flags.
 - Enabling Google without at least one registered client audience, or Apple without its bundle ID, prevents backend startup in every environment.
 - Runtime verification fails before network/JWT processing when a provider is disabled or its audience is absent; Google and Apple tokens for other applications are rejected.
+
+## ANNAI-11 Account Deletion and Data Export (2026-07-21)
+
+- Clients and workers can create and track deletion or export requests from the shared mobile Privacy and Data screen. Completed exports are generated on demand and can be shared from the device.
+- A super-admin-only dashboard queue supports pending, in-review, completed, and rejected outcomes with mandatory resolution notes and audit events.
+- Completing deletion removes credentials, social IDs, sessions, OTPs, push tokens, identity documents, attendance location/selfie data, and direct profile identifiers. The user/profile rows remain anonymized so statutory invoice and payroll records keep valid foreign keys.
+- Six focused PostgreSQL tests cover authentication, duplicate requests, export approval, super-admin authorization, idempotent deletion, audit outcome, invoice retention, and payroll retention.
+- Production status is **NEEDS_REVIEW** until Legal/Finance approve the retention schedule and privacy wording. The public account-deletion resource is now implemented under the versioned legal pages.
+
+## ANNAI-12 Versioned Policies and Consent (2026-07-21)
+
+- The admin web app hosts dated Privacy, Client Terms, Worker Terms, Refund/Cancellation, Grievance, and Account Deletion pages. Legacy `/privacy` and `/terms` links redirect to the current dated pages, and the authenticated dashboard footer links every primary document.
+- Client and worker apps fail closed on legal-status lookup, show every role-required document before consent, and record server-authoritative document rows with user, role, version, source, and acceptance time. Duplicate acceptance is idempotent and a later version requires fresh consent.
+- Both app variants expose all five primary documents from Privacy and data. Data exports include the user's legal acceptance history.
+- Five focused backend tests cover authentication, role-specific terms, complete-set enforcement, stale versions, idempotency, and admin exclusion. Mobile TypeScript and admin ESLint pass.
+- Production status is **NEEDS_REVIEW** until the owners in `docs/LEGAL_PUBLICATION_APPROVAL.md` approve the text and entity details, production URLs are deployed and checked, and the legal mailbox is monitored.
 
 ## How To Update This Tracker
 

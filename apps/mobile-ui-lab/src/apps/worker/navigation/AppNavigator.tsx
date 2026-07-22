@@ -15,6 +15,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import IssuesScreen from '../screens/IssuesScreen';
 import RaiseIssueScreen from '../screens/RaiseIssueScreen';
 import IssueDetailScreen from '../screens/IssueDetailScreen';
+import PrivacySettingsScreen from '../../../shared/screens/PrivacySettingsScreen';
 
 import type {
   WorkerTabParamList,
@@ -83,6 +84,7 @@ function ProfileStackNavigator() {
     <ProfileStack.Navigator screenOptions={{ headerShown: false }}>
       <ProfileStack.Screen name="Profile" component={ProfileScreen} />
       <ProfileStack.Screen name="Availability" component={AvailabilityScreen} />
+      <ProfileStack.Screen name="PrivacySettings" component={PrivacySettingsScreen} />
     </ProfileStack.Navigator>
   );
 }

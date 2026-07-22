@@ -185,6 +185,16 @@ def generate_download_url(s3_key: str, expires_in: int = 900) -> str:
     )
 
 
+def delete_document_object(key: str) -> None:
+    """Delete a private worker document. Both backends are idempotent."""
+    if key.startswith("local:"):
+        resolve_local_document_path(key).unlink(missing_ok=True)
+        return
+    if not is_s3_configured():
+        raise RuntimeError("Object storage is not configured for this document")
+    _get_s3_client().delete_object(Bucket=settings.s3_bucket, Key=key)
+
+
 def build_public_s3_url(s3_key: str) -> str:
     if settings.s3_public_endpoint_url:
         return (

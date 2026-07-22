@@ -7,9 +7,9 @@ import type { ClientAuthStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<ClientAuthStackParamList>();
 
-export default function AuthNavigator() {
+export default function AuthNavigator({ initialRouteName = 'Welcome' }: { initialRouteName?: keyof ClientAuthStackParamList }) {
   return (
-    <Stack.Navigator id="ClientAuthStack" screenOptions={{ headerShown: false }}>
+    <Stack.Navigator id="ClientAuthStack" initialRouteName={initialRouteName} screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Welcome" component={WelcomeScreen} />
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="VerifyOtp" component={VerifyOtpScreen} />

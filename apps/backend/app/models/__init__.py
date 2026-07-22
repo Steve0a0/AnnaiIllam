@@ -10,9 +10,11 @@ from app.models.client_rating import ClientRating
 from app.models.complaint import Complaint
 from app.models.complaint_sla_policy import ComplaintSlaPolicy
 from app.models.invoice import Invoice, InvoiceNumberSequence
+from app.models.legal_acceptance import LegalAcceptance
 from app.models.otp_code import OtpCode
 from app.models.payroll_item import PayrollItem
 from app.models.payroll_run import PayrollRun
+from app.models.privacy_request import PrivacyRequest
 from app.models.push_token import PushToken
 from app.models.quote import Quote
 from app.models.refresh_token import RefreshToken
@@ -50,6 +52,7 @@ __all__ = [
     "Attendance",
     "PayrollRun",
     "PayrollItem",
+    "PrivacyRequest",
     "PushToken",
     "WorkerDeduction",
     "ClientPayment",
@@ -58,6 +61,7 @@ __all__ = [
     "Complaint",
     "ComplaintSlaPolicy",
     "Invoice",
+    "LegalAcceptance",
     "InvoiceNumberSequence",
     "Replacement",
     "ClientWorkerBlacklist",
