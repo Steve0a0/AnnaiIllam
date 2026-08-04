@@ -1,5 +1,5 @@
 # ── Stage 1: deps ────────────────────────────────────────────────────────────
-FROM node:22.19.0-alpine AS deps
+FROM node:26.5.1-alpine AS deps
 
 WORKDIR /app
 COPY package.json package-lock.json* ./
@@ -7,7 +7,7 @@ RUN npm ci
 
 
 # ── Stage 2: builder ─────────────────────────────────────────────────────────
-FROM node:22.19.0-alpine AS builder
+FROM node:26.5.1-alpine AS builder
 
 WORKDIR /app
 
@@ -23,7 +23,7 @@ RUN npm run build
 
 
 # ── Stage 3: runtime ─────────────────────────────────────────────────────────
-FROM node:22.19.0-alpine AS runtime
+FROM node:26.5.1-alpine AS runtime
 
 WORKDIR /app
 
