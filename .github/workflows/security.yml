@@ -29,7 +29,7 @@ jobs:
           fetch-depth: 0
 
       - name: Scan repository
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -86,7 +86,7 @@ jobs:
         run: docker build --tag annai-backend:ci apps/backend
 
       - name: Scan backend image
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: annai-backend:ci
@@ -110,7 +110,7 @@ jobs:
         run: docker build --build-arg NEXT_PUBLIC_API_BASE_URL=https://api.example.invalid/api/v1 --tag annai-admin:ci apps/admin
 
       - name: Scan admin image
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: annai-admin:ci
